@@ -1,5 +1,5 @@
 from yam_realtime.agents.agent import Agent
-from yam_realtime.inverse_kinematics.yam_pyroki import BimanualYamPyroki
+from yam_realtime.robots.inverse_kinematics.yam_pyroki import BimanualYamPyroki
 from typing import Dict, Any
 import threading
 from yam_realtime.utils.portal_utils import remote
@@ -23,7 +23,6 @@ class ViserPyrokiAgent(Agent):
         self.real_vis_thread = threading.Thread(target=self._update_visualization)
         self.real_vis_thread.start()
         self._setup_visualization()
-
 
     def _setup_visualization(self):
         self.ik.base_frame_right.position = np.array(self.right_arm_extrinsic["position"])

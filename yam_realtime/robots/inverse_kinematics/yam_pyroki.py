@@ -26,9 +26,9 @@ except ImportError:
     print("pip install git+https://github.com/robot-descriptions/robot_descriptions.py.git@c99c3322c7bfdea65de4c8294573a823d0748bc3")
     exit()
 
-from yam_realtime.inverse_kinematics.pyroki_snippets._solve_ik import solve_ik
+from yam_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik import solve_ik
 
-from yam_realtime.base import ViserAbstractBase, TransformHandle
+from yam_realtime.robots.viser.viser_base import ViserAbstractBase, TransformHandle
 
 
 class BimanualYamPyroki(ViserAbstractBase):
