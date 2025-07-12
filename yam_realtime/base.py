@@ -153,10 +153,10 @@ class ViserAbstractBase(ABC):
         left_wxyz_xyz: [wxyz, xyz]
         right_wxyz_xyz: [wxyz, xyz]
         """
-        self.transform_handles["left"].control.wxyz = left_wxyz_xyz[:4]
-        self.transform_handles["right"].control.wxyz = right_wxyz_xyz[:4]
-        self.transform_handles["left"].control.position = left_wxyz_xyz[4:]
-        self.transform_handles["right"].control.position = right_wxyz_xyz[4:]
+        self.transform_handles["left"].control.wxyz = left_wxyz_xyz[:4]  # type: ignore
+        self.transform_handles["right"].control.wxyz = right_wxyz_xyz[:4]  # type: ignore
+        self.transform_handles["left"].control.position = left_wxyz_xyz[4:]  # type: ignore
+        self.transform_handles["right"].control.position = right_wxyz_xyz[4:]  # type: ignore
 
     @abstractmethod
     def home(self):
