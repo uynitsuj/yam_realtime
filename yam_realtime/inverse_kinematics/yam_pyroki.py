@@ -30,7 +30,7 @@ from yam_realtime.inverse_kinematics.pyroki_snippets._solve_ik import solve_ik
 from yam_realtime.base import ViserAbstractBase, TransformHandle
 
 
-class BimanualYamPyrokiVisualization(ViserAbstractBase):
+class BimanualYamPyroki(ViserAbstractBase):
     """
     Bimanual YAM robot visualization using PyRoki for inverse kinematics.
     Uses a single robot with two target links for bimanual operation.
@@ -68,16 +68,17 @@ class BimanualYamPyrokiVisualization(ViserAbstractBase):
         # Set initial positions for left and right arms
         # Left arm slightly to the left, right arm slightly to the right
         if self.transform_handles["left"].control is not None:
-            self.transform_handles["left"].control.position = (0.25, 0.15, 0.26)
-            self.transform_handles["left"].control.wxyz = vtf.SO3.from_rpy_radians(0.0, 0.0, 0.0).wxyz
+            self.transform_handles["left"].control.position = (0.25, 0.0, 0.26)
+            self.transform_handles["left"].control.wxyz = vtf.SO3.from_rpy_radians(np.pi/2, 0.0, np.pi/2).wxyz
+            self.transform_handles["left"].tcp_offset_frame.position = (0.0, 0.04, -0.13)
         if self.transform_handles["right"].control is not None:
             self.transform_handles["right"].control.remove()
             self.transform_handles["right"].tcp_offset_frame.remove()
         self.transform_handles["right"] = TransformHandle(
                 tcp_offset_frame=self.server.scene.add_frame(
-                    "/base/base_righttarget_right/tcp_offset", show_axes=False, position=(0.0, 0.0, 0.0), wxyz=vtf.SO3.from_rpy_radians(0.0, 0.0, 0.0).wxyz
+                    "/base/base_righttarget_right/tcp_offset", show_axes=False, position=(0.0, 0.04, -0.13), wxyz=vtf.SO3.from_rpy_radians(0.0, 0.0, 0.0).wxyz
                 ),
-                control=self.server.scene.add_transform_controls("/base/base_right/target_right", scale=self.tf_size_handle.value, position=(0.00, 0.0, 0.0), wxyz=(1, 0, 0, 0)),
+                control=self.server.scene.add_transform_controls("/base/base_right/target_right", scale=self.tf_size_handle.value, position=(0.25, 0.0, 0.26), wxyz=vtf.SO3.from_rpy_radians(np.pi/2, 0.0, np.pi/2).wxyz),
             )
 
     def _update_optional_handle_sizes(self):
