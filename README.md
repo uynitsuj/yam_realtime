@@ -6,6 +6,7 @@ Differential IK solving handled by the [pyroki](https://github.com/chungmin99/py
 
 ![yam_realtime](media/yam_realtime.gif)
 
+## Installation
 ```
 git clone --recurse-submodules https://github.com/uynitsuj/yam_realtime.git
 
