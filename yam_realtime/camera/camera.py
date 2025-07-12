@@ -1,65 +1,11 @@
-import os
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol, Tuple, TypeVar, Union
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 import numpy as np
-from dotdict import dotdict
 
 from yam_realtime.utils.portal_utils import remote
-
-T = TypeVar("T")
-
-
-def nest_dotdict(d: Union[Dict[str, Any], T]) -> Union[dotdict, T]:
-    """Convert nested dictionary to dotdict."""
-    if isinstance(d, dict):
-        d_dotdict = dotdict(d)
-        for k, v in d_dotdict.items():
-            if isinstance(v, dict):
-                d_dotdict[k] = nest_dotdict(v)
-        return d_dotdict
-    return d
-
-
-def plot_camera_read(camera: Any, save_datastream: bool = False, vis: bool = True) -> None:
-    import cv2
-
-    camera_data = camera.read()
-    if vis:
-        for k in camera_data.images.keys():
-            cv2.namedWindow(k)
-
-    counter = 0
-    if not os.path.exists("images"):
-        os.makedirs("images")
-    if save_datastream and not os.path.exists("stream"):
-        os.makedirs("stream")
-
-    while True:
-        data = camera.read()
-        ts = data.timestamp
-        camera_data = data.images
-
-        key = cv2.waitKey(1)
-        if vis:
-            for k in camera_data.keys():
-                cv2.imshow(k, camera_data[k][..., ::-1])
-                # plot ts on the image
-                cv2.putText(
-                    camera_data[k], f"ts: {ts}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA
-                )
-        if key == ord("s"):
-            for k in camera_data.keys():
-                cv2.imwrite(f"stream/{k}_{counter}.png", camera_data[k])
-        if save_datastream:
-            for k in camera_data.keys():
-                cv2.imwrite(f"stream/{k}_{counter}.png", camera_data[k])
-        counter += 1
-        if key == 27:
-            break
-
 
 @dataclass
 class IMUData:
@@ -254,9 +200,8 @@ if __name__ == "__main__":
     top_camera:
         _target_: yam_realtime.camera.camera.CameraNode
         camera:
-            _target_: yam_realtime.camera.opencv_camera.OpencvCamera
-            device_path: "/dev/video0"
-            camera_type: "realsense_camera"
+            _target_: yam_realtime.camera.camera.DummyCamera
+            name: "test_camera"
     """
     import yaml
     from tqdm import tqdm

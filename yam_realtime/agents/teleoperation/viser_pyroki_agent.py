@@ -9,6 +9,7 @@ import viser
 import viser.extras
 from copy import deepcopy
 import time
+from yam_realtime.camera.camera_utils import obs_get_rgb, resize_with_pad
 
 class ViserPyrokiAgent(Agent):
 
@@ -43,7 +44,7 @@ class ViserPyrokiAgent(Agent):
                 mesh.opacity = 0.25  # type: ignore
             self.right_gripper_slider_handle = self.viser_server.gui.add_slider("Right Gripper", min=0.0, max=2.4, step=0.01, initial_value=0.0)
 
-        # self.cam_image = self.viser_server.gui.add_image(np.zeros((100, 100, 3)), label="camera")
+        self.viser_cam_img_handles = {}
 
     def _update_visualization(self):
         while self.obs is None:
@@ -52,12 +53,21 @@ class ViserPyrokiAgent(Agent):
             if self.bimanual:
                 self.urdf_vis_right_real.update_cfg(np.flip(self.obs["right"]["joint_pos"]))
             self.urdf_vis_left_real.update_cfg(np.flip(self.obs["left"]["joint_pos"]))
-            # self.cam_image.image = self.obs["top_camera"]["images"]["rgb"]
+
+            # Extract RGB images from observation (if any)
+            rgb_images = obs_get_rgb(self.obs)
+            if rgb_images:
+                for key in rgb_images.keys():
+                    if key not in self.viser_cam_img_handles.keys():
+                        self.viser_cam_img_handles[key] = self.viser_server.gui.add_image(rgb_images[key], label=key)
+                    # resize viser images to 224x224
+                    self.viser_cam_img_handles[key].image = resize_with_pad(rgb_images[key], 224, 224)
+
             time.sleep(0.02)
 
     def act(self, obs: Dict[str, Any]) -> Any:        
         self.obs = deepcopy(obs)
-
+        
         action = {
             "left": {
                 "pos": np.concatenate([np.flip(self.ik.joints["left"]), [self.left_gripper_slider_handle.value]]),
