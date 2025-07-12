@@ -26,8 +26,7 @@ from yam_realtime.robots.viser.viser_base import ViserAbstractBase, TransformHan
 
 class YamPyroki(ViserAbstractBase):
     """
-    Bimanual YAM robot visualization using PyRoki for inverse kinematics.
-    Uses a single robot with two target links for bimanual operation.
+    YAM robot visualization using PyRoki for inverse kinematics.
     """
 
     def __init__(
@@ -36,7 +35,6 @@ class YamPyroki(ViserAbstractBase):
         viser_server: Optional[viser.ViserServer] = None,
         bimanual: bool = False,
     ):
-        # For bimanual operation, we'll use a single robot with two target links
         self.robot: Optional[pk.Robot] = None
         self.target_link_names = ["link_6"]
         self.joints = {"left": np.zeros(6)}
@@ -54,15 +52,12 @@ class YamPyroki(ViserAbstractBase):
 
     def _setup_solver_specific(self):
         """Setup PyRoki-specific components."""
-        # Create a single robot for bimanual operation
         self.robot = pk.Robot.from_urdf(self.urdf)
         
-        # Get rest pose from URDF
         self.rest_pose = self.urdf.cfg
         
     def _initialize_transform_handles(self):
-        """Initialize transform handle positions for both arms."""
-        # Set initial positions for left and right arms
+        """Initialize transform handle positions for arm IK targets."""
         if self.transform_handles["left"].control is not None:
             self.transform_handles["left"].control.position = (0.25, 0.0, 0.26)
             self.transform_handles["left"].control.wxyz = vtf.SO3.from_rpy_radians(np.pi/2, 0.0, np.pi/2).wxyz
@@ -84,13 +79,12 @@ class YamPyroki(ViserAbstractBase):
         pass
 
     def solve_ik(self):
-        """Solve inverse kinematics for both arms using multiple targets."""
+        """Solve inverse kinematics for arm IK targets."""
         if self.robot is None:
             return
             
         target_poses = self.get_target_poses()
         
-        # Check if we have both left and right targets
         if self.bimanual:
             if "left" not in target_poses or "right" not in target_poses:
                 return
@@ -98,7 +92,6 @@ class YamPyroki(ViserAbstractBase):
             if "left" not in target_poses:
                 return
         
-        # Prepare target data for both arms
         target_positions = []
         target_wxyzs = []
         for idx, side in enumerate(self.get_target_poses().keys()):
@@ -106,8 +99,6 @@ class YamPyroki(ViserAbstractBase):
             target_positions.append(target_tf.translation())
             target_wxyzs.append(target_tf.rotation().wxyz)
             
-            # Solve IK for all arms
-            # try:
             solution = solve_ik(
                 robot=self.robot,
                 target_link_name=self.target_link_names[idx],
@@ -115,10 +106,7 @@ class YamPyroki(ViserAbstractBase):
                 target_wxyz=target_tf.rotation().wxyz,
             )
             self.joints[side] = solution
-            # except Exception as e:
-            #     print(f"IK solving failed: {e}")
-            #     # Keep previous solution if IK fails
-            #     pass
+
         
 
     def update_visualization(self):
@@ -134,10 +122,8 @@ class YamPyroki(ViserAbstractBase):
         if self.bimanual:
             self.joints["right"] = self.rest_pose
         
-        # Reset transform handles to initial positions
         self._initialize_transform_handles()
         
-        # Update visualization with rest pose
         self.urdf_vis_left.update_cfg(self.rest_pose)
         if self.bimanual:
             self.urdf_vis_right.update_cfg(self.rest_pose)
@@ -156,10 +142,7 @@ class YamPyroki(ViserAbstractBase):
 
 def main():
     """Main function for YAM IK visualization."""
-    # Create visualization
     viz = YamPyroki(rate=100.0)
-    
-    # Run the visualization loop
     viz.run()
 
 

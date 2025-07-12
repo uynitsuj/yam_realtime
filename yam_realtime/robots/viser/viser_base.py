@@ -45,44 +45,31 @@ class ViserAbstractBase(ABC):
         self.rate = rate
         self.bimanual = bimanual
 
-        # Load URDF for visualization
         self.urdf = load_urdf_robot_description(robot_description)
 
-        # Initialize viser server
         self.viser_server = viser_server if viser_server is not None else viser.ViserServer()
 
-        # Initialize joint configuration
         self.joints = {"left": np.zeros(6)}
         if bimanual:
             self.joints["right"] = np.zeros(6)
-            
-        # Allow subclasses to do solver-specific setup first
+
         self._setup_solver_specific()
 
-        # Setup common components
         self._setup_visualization()
-
         self._setup_gui()
         self._setup_transform_handles()
 
     def _setup_visualization(self):
         """Setup basic visualization elements."""
-        # Add base frame and robot URDF
         self.base_frame = self.viser_server.scene.add_frame("/base", show_axes=False)
         self.urdf_vis_left = viser.extras.ViserUrdf(self.viser_server, self.urdf, root_node_name="/base")
 
-        # Add ground grid
         self.viser_server.scene.add_grid("ground", width=2, height=2, cell_size=0.1)
 
     def _setup_gui(self):
         """Setup GUI elements."""
-        # Add timing display
         self.timing_handle = self.viser_server.gui.add_number("Time (ms)", 0.01, disabled=True)
-
-        # Add gizmo size control
         self.tf_size_handle = self.viser_server.gui.add_slider("Gizmo size", min=0.05, max=0.4, step=0.01, initial_value=0.2)
-
-        # Add reset button
         self.reset_button = self.viser_server.gui.add_button("Reset to Rest Pose")
 
         @self.reset_button.on_click
@@ -107,16 +94,13 @@ class ViserAbstractBase(ABC):
                 control=self.viser_server.scene.add_transform_controls("target_right", scale=self.tf_size_handle.value),
             )
 
-        # Update transform handles when size changes
         @self.tf_size_handle.on_update
         def update_tf_size(_):
             for handle in self.transform_handles.values():
                 if handle.control:
                     handle.control.scale = self.tf_size_handle.value
-            # Let subclasses handle their own optional handles
             self._update_optional_handle_sizes()
 
-        # Initialize transform handle positions
         self._initialize_transform_handles()
 
     @property
@@ -131,9 +115,7 @@ class ViserAbstractBase(ABC):
 
     def update_visualization(self):
         """Update visualization with current state."""
-        if self.joints is not None:
-            # Update robot configuration
-            self.urdf_vis_left.update_cfg(self.joints)
+        self.urdf_vis_left.update_cfg(self.joints["left"]) 
 
     def get_target_poses(self):
         """Get target poses from transform controls."""
