@@ -51,9 +51,9 @@ class BimanualYamPyroki(ViserAbstractBase):
     
     def _setup_visualization(self):
         super()._setup_visualization()
-        self.base_frame_right = self.server.scene.add_frame("/base/base_right", show_axes=False)
+        self.base_frame_right = self.viser_server.scene.add_frame("/base/base_right", show_axes=False)
         self.base_frame_right.position = (0.0, 0.61, 0.0)
-        self.urdf_vis_right = viser.extras.ViserUrdf(self.server, self.urdf, root_node_name="/base/base_right")
+        self.urdf_vis_right = viser.extras.ViserUrdf(self.viser_server, self.urdf, root_node_name="/base/base_right")
 
     def _setup_solver_specific(self):
         """Setup PyRoki-specific components."""
@@ -75,10 +75,10 @@ class BimanualYamPyroki(ViserAbstractBase):
             self.transform_handles["right"].control.remove()
             self.transform_handles["right"].tcp_offset_frame.remove()
         self.transform_handles["right"] = TransformHandle(
-                tcp_offset_frame=self.server.scene.add_frame(
+                tcp_offset_frame=self.viser_server.scene.add_frame(
                     "/base/base_righttarget_right/tcp_offset", show_axes=False, position=(0.0, 0.04, -0.13), wxyz=vtf.SO3.from_rpy_radians(0.0, 0.0, 0.0).wxyz
                 ),
-                control=self.server.scene.add_transform_controls("/base/base_right/target_right", scale=self.tf_size_handle.value, position=(0.25, 0.0, 0.26), wxyz=vtf.SO3.from_rpy_radians(np.pi/2, 0.0, np.pi/2).wxyz),
+                control=self.viser_server.scene.add_transform_controls("/base/base_right/target_right", scale=self.tf_size_handle.value, position=(0.25, 0.0, 0.26), wxyz=vtf.SO3.from_rpy_radians(np.pi/2, 0.0, np.pi/2).wxyz),
             )
 
     def _update_optional_handle_sizes(self):

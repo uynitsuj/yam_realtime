@@ -47,7 +47,7 @@ class ViserAbstractBase(ABC):
         self.urdf = load_urdf_robot_description(robot_description)
 
         # Initialize viser server
-        self.server = viser_server if viser_server is not None else viser.ViserServer()
+        self.viser_server = viser_server if viser_server is not None else viser.ViserServer()
 
         # Initialize joint configuration
         self.joints = None
@@ -64,22 +64,22 @@ class ViserAbstractBase(ABC):
     def _setup_visualization(self):
         """Setup basic visualization elements."""
         # Add base frame and robot URDF
-        self.base_frame = self.server.scene.add_frame("/base", show_axes=False)
-        self.urdf_vis_left = viser.extras.ViserUrdf(self.server, self.urdf, root_node_name="/base")
+        self.base_frame = self.viser_server.scene.add_frame("/base", show_axes=False)
+        self.urdf_vis_left = viser.extras.ViserUrdf(self.viser_server, self.urdf, root_node_name="/base")
 
         # Add ground grid
-        self.server.scene.add_grid("ground", width=2, height=2, cell_size=0.1)
+        self.viser_server.scene.add_grid("ground", width=2, height=2, cell_size=0.1)
 
     def _setup_gui(self):
         """Setup GUI elements."""
         # Add timing display
-        self.timing_handle = self.server.gui.add_number("Time (ms)", 0.01, disabled=True)
+        self.timing_handle = self.viser_server.gui.add_number("Time (ms)", 0.01, disabled=True)
 
         # Add gizmo size control
-        self.tf_size_handle = self.server.gui.add_slider("Gizmo size", min=0.05, max=0.4, step=0.01, initial_value=0.2)
+        self.tf_size_handle = self.viser_server.gui.add_slider("Gizmo size", min=0.05, max=0.4, step=0.01, initial_value=0.2)
 
         # Add reset button
-        self.reset_button = self.server.gui.add_button("Reset to Rest Pose")
+        self.reset_button = self.viser_server.gui.add_button("Reset to Rest Pose")
 
         @self.reset_button.on_click
         def _(_):
@@ -89,16 +89,16 @@ class ViserAbstractBase(ABC):
         """Setup transform handles for end effectors."""
         self.transform_handles = {
             "left": TransformHandle(
-                tcp_offset_frame=self.server.scene.add_frame(
+                tcp_offset_frame=self.viser_server.scene.add_frame(
                     "target_left/tcp_offset", show_axes=False, position=(0.0, 0.0, 0.0), wxyz=(1, 0, 0, 0)
                 ),
-                control=self.server.scene.add_transform_controls("target_left", scale=self.tf_size_handle.value),
+                control=self.viser_server.scene.add_transform_controls("target_left", scale=self.tf_size_handle.value),
             ),
             "right": TransformHandle(
-                tcp_offset_frame=self.server.scene.add_frame(
+                tcp_offset_frame=self.viser_server.scene.add_frame(
                     "target_right/tcp_offset", show_axes=False, position=(0.0, 0.0, 0.0), wxyz=(1, 0, 0, 0)
                 ),
-                control=self.server.scene.add_transform_controls("target_right", scale=self.tf_size_handle.value),
+                control=self.viser_server.scene.add_transform_controls("target_right", scale=self.tf_size_handle.value),
             ),
         }
 
@@ -128,7 +128,7 @@ class ViserAbstractBase(ABC):
         """Update visualization with current state."""
         if self.joints is not None:
             # Update robot configuration
-            self.urdf_vis.update_cfg(self.joints)
+            self.urdf_vis_left.update_cfg(self.joints)
 
     def get_target_poses(self):
         """Get target poses from transform controls."""

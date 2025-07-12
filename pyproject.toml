@@ -5,7 +5,13 @@ description = "Yam arms realtime control repo"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "viser"
+    "viser",
+    "omegaconf",
+    "portal",
+    "dm-env==1.6",
+    "dm_control==1.0.30",
+    "dotdict==0.1",
+    "numpy==1.26.4",
 ]
 
 [build-system]
