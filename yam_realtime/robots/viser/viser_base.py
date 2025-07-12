@@ -40,8 +40,10 @@ class ViserAbstractBase(ABC):
         rate: float = 100.0,
         viser_server: Optional[viser.ViserServer] = None,
         robot_description: str = "yam_description",
+        bimanual: bool = False,
     ):
         self.rate = rate
+        self.bimanual = bimanual
 
         # Load URDF for visualization
         self.urdf = load_urdf_robot_description(robot_description)
@@ -50,8 +52,10 @@ class ViserAbstractBase(ABC):
         self.viser_server = viser_server if viser_server is not None else viser.ViserServer()
 
         # Initialize joint configuration
-        self.joints = None
-
+        self.joints = {"left": np.zeros(6)}
+        if bimanual:
+            self.joints["right"] = np.zeros(6)
+            
         # Allow subclasses to do solver-specific setup first
         self._setup_solver_specific()
 
@@ -94,13 +98,14 @@ class ViserAbstractBase(ABC):
                 ),
                 control=self.viser_server.scene.add_transform_controls("target_left", scale=self.tf_size_handle.value),
             ),
-            "right": TransformHandle(
+        }
+        if self.bimanual:
+            self.transform_handles["right"] = TransformHandle(
                 tcp_offset_frame=self.viser_server.scene.add_frame(
                     "target_right/tcp_offset", show_axes=False, position=(0.0, 0.0, 0.0), wxyz=(1, 0, 0, 0)
                 ),
                 control=self.viser_server.scene.add_transform_controls("target_right", scale=self.tf_size_handle.value),
-            ),
-        }
+            )
 
         # Update transform handles when size changes
         @self.tf_size_handle.on_update
@@ -154,14 +159,15 @@ class ViserAbstractBase(ABC):
         right_wxyz_xyz: [wxyz, xyz]
         """
         self.transform_handles["left"].control.wxyz = left_wxyz_xyz[:4]  # type: ignore
-        self.transform_handles["right"].control.wxyz = right_wxyz_xyz[:4]  # type: ignore
         self.transform_handles["left"].control.position = left_wxyz_xyz[4:]  # type: ignore
-        self.transform_handles["right"].control.position = right_wxyz_xyz[4:]  # type: ignore
+        if self.bimanual:
+            self.transform_handles["right"].control.wxyz = right_wxyz_xyz[:4]  # type: ignore
+            self.transform_handles["right"].control.position = right_wxyz_xyz[4:]  # type: ignore
 
     @abstractmethod
     def home(self):
         """Reset robot to rest pose. Must be implemented by subclasses."""
-        pass
+        raise NotImplementedError
 
     def run(self):
         """Main run loop."""
@@ -180,14 +186,14 @@ class ViserAbstractBase(ABC):
     @abstractmethod
     def _setup_solver_specific(self):
         """Setup solver-specific components. Must be implemented by subclasses."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def _initialize_transform_handles(self):
         """Initialize transform handle positions. Must be implemented by subclasses."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def solve_ik(self):
-        """Solve inverse kinematics. Must be implemented by subclasses."""
-        pass
+        """Solve inverse kinematics. Must be implemented by subclasses (only necessary if is an IK solver class)."""
+        raise NotImplementedError

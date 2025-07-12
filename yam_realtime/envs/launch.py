@@ -37,7 +37,7 @@ class LaunchConfig:
 
 @dataclass
 class Args:
-    config_path: Tuple[str, ...] = ("~/yam_realtime/configs/yam_viser.yaml",)
+    config_path: Tuple[str, ...] = ("~/yam_realtime/configs/yam_viser_bimanual.yaml",)
 
 
 def main(args: Args) -> None:

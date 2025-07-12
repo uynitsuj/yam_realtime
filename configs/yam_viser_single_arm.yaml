@@ -11,14 +11,10 @@ _target_: yam_realtime.envs.launch.LaunchConfig
 
 robots:
   left: ["robot_configs/yam/left.yaml"]
-  right: ["robot_configs/yam/left.yaml", "robot_configs/yam/right.yaml"]
 
 agent:
   _target_: yam_realtime.agents.teleoperation.viser_pyroki_agent.ViserPyrokiAgent
-  right_arm_extrinsic:
-      position: [0.0, -0.61, 0.0]
-      rotation: [1.0, 0.0, 0.0, 0.0]
-
+  bimanual: false
 
 station_metadata:
   world_frame: "left_arm" # front x, left y, up z
