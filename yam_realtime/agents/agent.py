@@ -46,4 +46,12 @@ class PolicyAgent(Agent):
         """
         raise NotImplementedError
 
+    @remote()
+    def action_spec(self) -> ActionSpec:
+        """Check if the agent is compatible with the environment.
+
+        Args:
+            action_spec: dictionary of action specification.
+        """
+        raise NotImplementedError
 
