@@ -9,6 +9,7 @@ git clone --recurse-submodules https://github.com/uynitsuj/yam_realtime.git
 
 # Or if you already cloned the repo:
 git submodule update --init --recursive
+
 cd yam_realtime
 python -m pip install -e .
 python -m pip install /dependencies/i2rt/
