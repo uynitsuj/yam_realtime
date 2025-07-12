@@ -13,5 +13,5 @@ cd yam_realtime
 python -m pip install -e .
 python -m pip install /dependencies/i2rt/
 
-python yam_realtime/envs/launch.py
+python yam_realtime/envs/launch.py --config_path configs/yam_viser.yaml
 ```
