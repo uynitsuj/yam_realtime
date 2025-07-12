@@ -37,29 +37,6 @@ class LaunchConfig:
 @dataclass
 class Args:
     config_path: Tuple[str, ...] = ("~/yam_realtime/configs/yam_viser.yaml",)
-    overrides: Optional[List[str]] = None  # For flexible config overrides
-
-
-def apply_overrides(config: dict, overrides: List[str]) -> dict:
-    """
-    Applies key=value style overrides to a nested configuration dictionary.
-    """
-    for override in overrides:
-        key, value = override.split("=", 1)
-        keys = key.split(".")
-        d = config
-        for k in keys[:-1]:
-            if k not in d:
-                d[k] = {}  # Create nested dictionaries if missing
-            d = d[k]
-        # Try to infer the value type
-        try:
-            value = eval(value)
-        except Exception as e:
-            pass
-        d[keys[-1]] = value
-    return config
-
 
 def main(args: Args) -> None:
     # Setup logging
@@ -71,10 +48,6 @@ def main(args: Args) -> None:
     )
     # Load configuration from YAML
     configs_dict = DictLoader.load([os.path.expanduser(x) for x in args.config_path])
-
-    # Apply overrides if provided
-    if args.overrides:
-        configs_dict = apply_overrides(configs_dict, args.overrides)
 
     agent_cfg = configs_dict.pop("agent")
 
@@ -108,9 +81,9 @@ def main(args: Args) -> None:
     else:
         # Define the agent methods that need to be remotely accessible
         agent_remote_methods = {
-            "act": False,  # act method doesn't need serialization
-            "reset": False,  # reset method if it exists
-            "close": False,  # close method if it exists
+            "act": False, 
+            "reset": False, 
+            "close": False,
         }
         _, agent = _launch_remote_get_local_handler(agent_cfg, custom_remote_methods=agent_remote_methods)
 

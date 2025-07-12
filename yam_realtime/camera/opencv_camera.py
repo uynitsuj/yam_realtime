@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from xdof.camera.camera import CameraData, CameraDriver
+from yam_realtime.camera.camera import CameraData, CameraDriver
 
 
 @dataclass

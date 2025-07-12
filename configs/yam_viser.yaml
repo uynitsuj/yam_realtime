@@ -3,31 +3,18 @@ _target_: yam_realtime.envs.launch.LaunchConfig
 # sensors:
 #   cameras:
 #     top_camera:
-#         _target_: xdof.camera.camera.CameraNode
+#         _target_: yam_realtime.camera.camera.CameraNode
 #         camera:
-#             _target_: xdof.camera.realsense.RealSenseCamera
-#             device_id: "419122270093"
-#             resolution: [640, 480]
-#     left_camera:
-#         _target_: xdof.camera.camera.CameraNode
-#         camera:
-#             _target_: xdof.camera.realsense.RealSenseCamera
-#             device_id: "218622270185"
-#             resolution: [640, 480]
-#     right_camera:
-#         _target_: xdof.camera.camera.CameraNode
-#         camera:
-#             _target_: xdof.camera.realsense.RealSenseCamera
-#             device_id: "218622270376"
-#             resolution: [640, 480]
-
+#             _target_: yam_realtime.camera.opencv_camera.OpencvCamera
+#             device_path: "/dev/video0"
+#             camera_type: "realsense_camera"
 
 robots:
   left: ["robot_configs/yam/left.yaml"]
   right: ["robot_configs/yam/left.yaml", "robot_configs/yam/right.yaml"]
 
 agent:
-  _target_: yam_realtime.agents.viser_pyroki.ViserPyrokiAgent
+  _target_: yam_realtime.agents.viser_pyroki_agent.ViserPyrokiAgent
 
 station_metadata:
   world_frame: "left_arm" # front x, left y, up z

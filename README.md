@@ -12,4 +12,6 @@ git submodule update --init --recursive
 cd yam_realtime
 python -m pip install -e .
 python -m pip install /dependencies/i2rt/
+
+python yam_realtime/envs/launch.py
 ```
