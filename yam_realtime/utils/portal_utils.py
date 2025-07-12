@@ -242,9 +242,9 @@ def launch_remote_server(
 
 
 if __name__ == "__main__":
-    from xdof.configs.loader import DictLoader
+    from yam_realtime.configs.loader import DictLoader
 
-    configs_dict = DictLoader.load("/home/fred/lab42/configs/arx_sz_01.yaml")
+    configs_dict = DictLoader.load("~/yam_realtime/configs/yam_viser.yaml")
     agent_cfg = configs_dict.pop("agent")
 
     p, client = launch_remote_get_local_handler(agent_cfg, 3339)
