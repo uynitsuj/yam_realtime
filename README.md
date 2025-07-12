@@ -24,7 +24,7 @@ Then run the launch entrypoint script with an appropriate robot config file:
 python yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
 ```
 
-Add your own agents (e.g. robot policy controllers) by extending the base class `yam_realtime.agents.agent Agent`
+Add your own agents (e.g. robot policy controllers) by extending the base class `yam_realtime.agents.agent Agent` and adding an appropriate config file.
 
 ## TODOS
 
