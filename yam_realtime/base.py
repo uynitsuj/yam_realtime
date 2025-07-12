@@ -15,8 +15,8 @@ import viser.transforms as vtf
 try:
     from robot_descriptions.loaders.yourdfpy import load_robot_description as load_urdf_robot_description
 except ImportError:
-    print("ImportError: robot_descriptions not found, for now:")
-    print("pip install git+https://github.com/robot-descriptions/robot_descriptions.py.git")
+    print("ImportError: robot_descriptions not found:")
+    print("pip install git+https://github.com/robot-descriptions/robot_descriptions.py.git@c99c3322c7bfdea65de4c8294573a823d0748bc3")
     exit()
 
 
@@ -39,7 +39,7 @@ class ViserAbstractBase(ABC):
         self,
         rate: float = 100.0,
         viser_server: Optional[viser.ViserServer] = None,
-        robot_description: str = "rby1_description",
+        robot_description: str = "yam_description",
     ):
         self.rate = rate
 
@@ -65,7 +65,7 @@ class ViserAbstractBase(ABC):
         """Setup basic visualization elements."""
         # Add base frame and robot URDF
         self.base_frame = self.server.scene.add_frame("/base", show_axes=False)
-        self.urdf_vis = viser.extras.ViserUrdf(self.server, self.urdf, root_node_name="/base")
+        self.urdf_vis_left = viser.extras.ViserUrdf(self.server, self.urdf, root_node_name="/base")
 
         # Add ground grid
         self.server.scene.add_grid("ground", width=2, height=2, cell_size=0.1)
