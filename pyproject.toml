@@ -1,0 +1,14 @@
+[project]
+name = "yam_realtime"
+version = "0.1.0"
+description = "Yam arms realtime control repo"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "viser"
+]
+
+
+[project.urls]
+Repository = "https://github.com/uynitsuj/yam_realtime"
