@@ -30,7 +30,7 @@ def setup_can_interfaces():
 
 
 def initialize_sensors(
-    sensors_cfg: Dict[str, Any], 
+    sensors_cfg: Optional[Dict[str, Any]], 
     server_processes: List[Any]
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
@@ -47,6 +47,7 @@ def initialize_sensors(
     camera_info = {}
     
     if sensors_cfg is None:
+        logging.info("No sensors configured")
         return camera_dict, camera_info
     
     _launch_remote_get_local_handler = partial(
