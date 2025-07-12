@@ -6,6 +6,7 @@ import time
 from typing import Dict, Optional
 
 import numpy as np
+from copy import deepcopy
 
 try:
     import pyroki as pk
@@ -53,7 +54,7 @@ class BimanualYamPyroki(ViserAbstractBase):
         super()._setup_visualization()
         self.base_frame_right = self.viser_server.scene.add_frame("/base/base_right", show_axes=False)
         self.base_frame_right.position = (0.0, -0.61, 0.0)
-        self.urdf_vis_right = viser.extras.ViserUrdf(self.viser_server, self.urdf, root_node_name="/base/base_right")
+        self.urdf_vis_right = viser.extras.ViserUrdf(self.viser_server, deepcopy(self.urdf), root_node_name="/base/base_right")
 
     def _setup_solver_specific(self):
         """Setup PyRoki-specific components."""

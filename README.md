@@ -4,7 +4,7 @@ A collection of realtime control interfaces for bi-manual I2RT YAM arms.
 
 Differential IK solving handled by the [pyroki](https://github.com/chungmin99/pyroki) library developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
 
-![yam_realtime](media/YAM_realtime.gif)
+![yam_realtime](media/yam_realtime.gif)
 
 ```
 git clone --recurse-submodules https://github.com/uynitsuj/yam_realtime.git
@@ -26,4 +26,3 @@ Add your own agents (e.g. robot policy controllers) by extending the base class 
 - [ ] Add data logging infrastructure
 - [ ] Implement a [Diffusion Policy](https://diffusion-policy.cs.columbia.edu/) agent controller
 - [ ] Implement a [Physical Intelligence π0](https://www.physicalintelligence.company/blog/pi0) agent controller
-- [ ] Debug frame twitching in visualization
