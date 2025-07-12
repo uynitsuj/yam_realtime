@@ -4,6 +4,8 @@ A collection of realtime control interfaces for bi-manual I2RT YAM arms.
 
 Differential IK solving handled by the [pyroki](https://github.com/chungmin99/pyroki) library developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
 
+![yam_realtime](media/YAM_realtime.gif)
+
 ```
 git clone --recurse-submodules https://github.com/uynitsuj/yam_realtime.git
 
