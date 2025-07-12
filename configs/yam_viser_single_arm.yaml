@@ -18,7 +18,3 @@ agent:
 
 station_metadata:
   world_frame: "left_arm" # front x, left y, up z
-  extrinsics:
-    right_arm_extrinsic:
-      position: [0.0, -0.61, 0.0]
-      rotation: [1.0, 0.0, 0.0, 0.0]
