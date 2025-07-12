@@ -37,9 +37,9 @@ class ViserPyrokiAgent(Agent):
         self.urdf_vis_right_real = viser.extras.ViserUrdf(self.viser_server, deepcopy(self.ik.urdf), root_node_name="/base_left_real/base_right_real", mesh_color_override=(0.8, 0.5, 0.5))
 
         for mesh in self.urdf_vis_left_real._meshes:
-            mesh.opacity = 0.25
+            mesh.opacity = 0.25  # type: ignore
         for mesh in self.urdf_vis_right_real._meshes:
-            mesh.opacity = 0.25
+            mesh.opacity = 0.25  # type: ignore
 
         self.left_gripper_slider_handle = self.viser_server.gui.add_slider("Left Gripper", min=0.0, max=2.4, step=0.01, initial_value=0.0)
         self.right_gripper_slider_handle = self.viser_server.gui.add_slider("Right Gripper", min=0.0, max=2.4, step=0.01, initial_value=0.0)

@@ -88,6 +88,9 @@ class BimanualYamPyroki(ViserAbstractBase):
 
     def solve_ik(self):
         """Solve inverse kinematics for both arms using multiple targets."""
+        if self.robot is None:
+            return
+            
         target_poses = self.get_target_poses()
         
         # Check if we have both left and right targets

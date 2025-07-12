@@ -90,7 +90,7 @@ def initialize_sensors(
                 _, client = _launch_remote_get_local_handler(camera_config)
                 camera_dict[camera_name] = client
                 
-                if hasattr(client, 'supported_remote_methods') and "get_camera_info" in client.supported_remote_methods:
+                if hasattr(client, 'supported_remote_methods') and "get_camera_info" in client.supported_remote_methods:  # type: ignore
                     camera_info[camera_name] = client.get_camera_info()
                 else:
                     raise AttributeError(f"Camera {camera_name} does not implement 'get_camera_info'!")
@@ -157,7 +157,7 @@ def _create_robot_client(
                 process_pool=server_processes,
                 custom_remote_methods=ROBOT_PROTOCOL_METHODS,
             )
-            return robot_client
+            return robot_client  # type: ignore
     
     elif isinstance(robot_path_or_robot, Robot):
         # Handle robot instance - create remote server
@@ -171,7 +171,7 @@ def _create_robot_client(
         
         process = portal.Process(partial(_launch_robot_server, robot=robot_path_or_robot, port=port), start=True)
         server_processes.append(process)
-        return Client(port)
+        return Client(port)  # type: ignore
     
     else:
         raise ValueError(f"Invalid robot configuration: {robot_path_or_robot}")
