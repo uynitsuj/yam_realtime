@@ -41,6 +41,9 @@ class ViserPyrokiAgent(Agent):
         for mesh in self.urdf_vis_right_real._meshes:
             mesh.opacity = 0.25
 
+        self.left_gripper_slider_handle = self.viser_server.gui.add_slider("Left Gripper", min=0.0, max=2.4, step=0.01, initial_value=0.0)
+        self.right_gripper_slider_handle = self.viser_server.gui.add_slider("Right Gripper", min=0.0, max=2.4, step=0.01, initial_value=0.0)
+
         # self.cam_image = self.viser_server.gui.add_image(np.zeros((100, 100, 3)), label="camera")
 
     def _update_visualization(self):
@@ -57,10 +60,10 @@ class ViserPyrokiAgent(Agent):
 
         action = {
             "left": {
-                "pos": np.concatenate([np.flip(self.ik.joints["left"]), [0.0]]),
+                "pos": np.concatenate([np.flip(self.ik.joints["left"]), [self.left_gripper_slider_handle.value]]),
             },
             "right": {
-                "pos": np.concatenate([np.flip(self.ik.joints["right"]), [0.0]]),
+                "pos": np.concatenate([np.flip(self.ik.joints["right"]), [self.right_gripper_slider_handle.value]]),
             },
         }
 
