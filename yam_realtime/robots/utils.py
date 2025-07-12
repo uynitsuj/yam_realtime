@@ -137,16 +137,6 @@ YAM_ARM_MOTIONS = [
 ]
 
 
-XDOF_ARM_MOTIONS = [
-    np.array([1.57, -1.57, 0, -1.57, 0.0, 0.0, 0.0]),
-    np.array([1.0, -3, 0, -3.14, 0.0, 0.0, 0.0]),
-    np.array([-1.0, -3, 2.5, -3.14, -2.5, -1, 1.2]),
-    np.array([1.0, -3, -2.5, -3.14, 2.5, 1, -1.2]),
-    np.array([1.57, -1.57, 0, -1.57, 0.0, 0.0, 0.0]),
-    np.array([1.57, -0.01, 0.0, -0.01, 0.0, 0.0, 0.0]),
-]
-
-
 def aging_motion_control(
     robot: Robot,
     motion_list: List[np.ndarray],
