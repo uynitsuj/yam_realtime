@@ -16,7 +16,7 @@ python -m pip install /dependencies/i2rt/
 python yam_realtime/envs/launch.py --config_path configs/yam_viser.yaml
 ```
 
-Add your own agents (robot policy agents) by extending the base class `yam_realtime.agents.agent Agent`!
+Add your own agents (e.g. robot policy controllers) by extending the base class `yam_realtime.agents.agent Agent`
 
 ## TODOS
 
