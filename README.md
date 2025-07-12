@@ -15,8 +15,11 @@ git submodule update --init --recursive
 cd yam_realtime
 python -m pip install -e .
 python -m pip install /dependencies/i2rt/
+```
+First configure YAM arms CAN chain according to instructions from the [I2RT repo](https://github.com/i2rt-robotics/i2rt)
+```
 
-python yam_realtime/envs/launch.py --config_path configs/yam_viser.yaml
+python yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
 ```
 
 Add your own agents (e.g. robot policy controllers) by extending the base class `yam_realtime.agents.agent Agent`
