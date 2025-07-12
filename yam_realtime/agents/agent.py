@@ -1,9 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Dict, Protocol
 
-import numpy as np
-# from dm_env.specs import Array
-
 from yam_realtime.agents.constants import ActionSpec
 from yam_realtime.utils.portal_utils import remote
 

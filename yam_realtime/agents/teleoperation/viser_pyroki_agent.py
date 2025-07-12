@@ -3,7 +3,6 @@ from yam_realtime.robots.inverse_kinematics.yam_pyroki import YamPyroki
 from typing import Dict, Any, Optional
 import threading
 from yam_realtime.utils.portal_utils import remote
-from yam_realtime.agents.constants import ActionSpec
 import numpy as np
 from dm_env.specs import Array
 import viser

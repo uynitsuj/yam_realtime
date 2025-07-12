@@ -7,8 +7,6 @@ import portal
 
 from yam_realtime.configs.instantiate import instantiate
 from yam_realtime.robots.utils import Timeout
-# from yam_realtime.utils.logging_utils import setup_logging
-
 
 def remote(serialization_needed: bool = False) -> Callable:
     """

@@ -3,7 +3,6 @@ Utilities for launching and configuring robots, sensors, and agents.
 """
 
 import logging
-import os
 import subprocess
 import time
 from functools import partial
@@ -12,7 +11,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import omegaconf
 
 from yam_realtime.configs.instantiate import instantiate
-from yam_realtime.camera.camera import CameraDriver
 from yam_realtime.configs.loader import DictLoader
 from yam_realtime.robots.robot import ROBOT_PROTOCOL_METHODS, Robot
 from yam_realtime.utils.portal_utils import (
