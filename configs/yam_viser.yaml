@@ -15,6 +15,10 @@ robots:
 
 agent:
   _target_: yam_realtime.agents.viser_pyroki_agent.ViserPyrokiAgent
+  right_arm_extrinsic:
+      position: [0.0, -0.61, 0.0]
+      rotation: [1.0, 0.0, 0.0, 0.0]
+
 
 station_metadata:
   world_frame: "left_arm" # front x, left y, up z

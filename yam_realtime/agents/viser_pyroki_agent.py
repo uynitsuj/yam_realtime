@@ -10,7 +10,9 @@ import viser
 import viser.extras
 
 class ViserPyrokiAgent(Agent):
-    def __init__(self):
+
+    def __init__(self, right_arm_extrinsic: Dict[str, Any]):
+        self.right_arm_extrinsic = right_arm_extrinsic
         self.viser_server = viser.ViserServer()
         self.ik = BimanualYamPyroki(viser_server=self.viser_server)
         self.thread = threading.Thread(target=self.ik.run)
@@ -19,6 +21,9 @@ class ViserPyrokiAgent(Agent):
 
 
     def _setup_visualization(self):
+        self.ik.base_frame_right.position = np.array(self.right_arm_extrinsic["position"])
+        self.ik.base_frame_right.wxyz = np.array(self.right_arm_extrinsic["rotation"])
+
         self.base_frame_left_real = self.viser_server.scene.add_frame("/base_left_real", show_axes=False)
         self.base_frame_right_real = self.viser_server.scene.add_frame("/base_left_real/base_right_real", show_axes=False)
         self.base_frame_right_real.position = self.ik.base_frame_right.position
