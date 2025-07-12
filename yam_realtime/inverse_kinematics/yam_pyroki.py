@@ -48,7 +48,7 @@ class BimanualYamPyroki(ViserAbstractBase):
         self.target_link_names = ["link_6", "link_6"]  # Assuming bimanual robot has these links
         
         super().__init__(rate, viser_server, robot_description)
-        self.joints: Dict[str, np.ndarray] = {"left": np.zeros(7), "right": np.zeros(7)}
+        self.joints: Dict[str, np.ndarray] = {"left": np.zeros(6), "right": np.zeros(6)}
     
     def _setup_visualization(self):
         super()._setup_visualization()

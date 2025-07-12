@@ -1,0 +1,208 @@
+"""
+Utilities for launching and configuring robots, sensors, and agents.
+"""
+
+import logging
+import os
+import subprocess
+import time
+from functools import partial
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import omegaconf
+
+from yam_realtime.configs.instantiate import instantiate
+from yam_realtime.camera.camera import CameraDriver
+from yam_realtime.configs.loader import DictLoader
+from yam_realtime.robots.robot import ROBOT_PROTOCOL_METHODS, Robot
+from yam_realtime.utils.portal_utils import (
+    Client,
+    launch_remote_get_local_handler,
+)
+
+
+def setup_can_interfaces():
+    """Setup CAN interfaces for robot communication."""
+    logging.info("Setting up CAN interfaces...")
+    subprocess.run(["bash", "yam_realtime/scripts/reset_all_can.sh"], check=True)
+    time.sleep(0.5)
+    logging.info("CAN interfaces ready")
+
+
+def initialize_sensors(
+    sensors_cfg: Dict[str, Any], 
+    server_processes: List[Any]
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Initialize sensors (cameras) from configuration.
+    
+    Args:
+        sensors_cfg: Sensor configuration dictionary
+        server_processes: List to track server processes
+        
+    Returns:
+        Tuple of (camera_dict, camera_info)
+    """
+    camera_dict = {}
+    camera_info = {}
+    
+    if sensors_cfg is None:
+        return camera_dict, camera_info
+    
+    _launch_remote_get_local_handler = partial(
+        launch_remote_get_local_handler,
+        launch_remote=True,
+        process_pool=server_processes,
+    )
+    
+    for sensor_name, sensor_cfg in sensors_cfg.items():
+        if sensor_name == "cameras" and sensor_cfg is not None:
+            for camera_name, camera_config in sensor_cfg.items():
+                logging.info(f"Initializing camera: {camera_name}")
+                camera_config["camera"]["name"] = camera_name
+                _, client = _launch_remote_get_local_handler(camera_config)
+                camera_dict[camera_name] = client
+                
+                if "get_camera_info" in client.supported_remote_methods:
+                    camera_info[camera_name] = client.get_camera_info()
+                else:
+                    raise AttributeError(f"Camera {camera_name} does not implement 'get_camera_info'!")
+    
+    logging.info(f"Initialized {len(camera_dict)} cameras")
+    return camera_dict, camera_info
+
+
+def initialize_robots(
+    robots_cfg: Dict[str, Union[str, Robot]], 
+    server_processes: List[Any]
+) -> Dict[str, Robot]:
+    """
+    Initialize robots from configuration.
+    
+    Args:
+        robots_cfg: Robot configuration dictionary
+        server_processes: List to track server processes
+        
+    Returns:
+        Dictionary of initialized robots
+    """
+    robots = {}
+    
+    for robot_name, robot_path_or_robot in robots_cfg.items():
+        logging.info(f"Initializing robot: {robot_name}")
+        robot_client = _create_robot_client(robot_path_or_robot, server_processes)
+        robots[robot_name] = robot_client
+    
+    logging.info(f"Initialized {len(robots)} robots")
+    return robots
+
+
+def _create_robot_client(
+    robot_path_or_robot: Union[str, Robot, List[str]], 
+    server_processes: List[Any]
+) -> Robot:
+    """
+    Create a robot client from configuration or robot instance.
+    
+    Args:
+        robot_path_or_robot: Robot configuration path(s) or robot instance
+        server_processes: List to track server processes
+        
+    Returns:
+        Robot client instance
+    """
+    if isinstance(robot_path_or_robot, (str, omegaconf.listconfig.ListConfig, list)):
+        # Handle configuration file path(s)
+        if isinstance(robot_path_or_robot, omegaconf.listconfig.ListConfig):
+            robot_path_or_robot = list(robot_path_or_robot)
+        
+        try:
+            robot_dict = DictLoader.load(robot_path_or_robot)
+        except Exception as e:
+            logging.error(f"Failed to load robot config: {robot_path_or_robot}")
+            raise
+        
+        if "Client" in robot_dict["_target_"]:
+            return instantiate(robot_dict)
+        else:
+            _, robot_client = launch_remote_get_local_handler(
+                robot_dict,
+                process_pool=server_processes,
+                custom_remote_methods=ROBOT_PROTOCOL_METHODS,
+            )
+            return robot_client
+    
+    elif isinstance(robot_path_or_robot, Robot):
+        # Handle robot instance - create remote server
+        import portal
+        port = portal.free_port()
+        
+        def _launch_robot_server(robot: Any, port: int) -> None:
+            from yam_realtime.utils.portal_utils import RemoteServer
+            remote_server = RemoteServer(robot, port, custom_remote_methods=ROBOT_PROTOCOL_METHODS)
+            remote_server.serve()
+        
+        process = portal.Process(partial(_launch_robot_server, robot=robot_path_or_robot, port=port), start=True)
+        server_processes.append(process)
+        return Client(port)
+    
+    else:
+        raise ValueError(f"Invalid robot configuration: {robot_path_or_robot}")
+
+
+def initialize_agent(agent_cfg: Dict[str, Any], server_processes: List[Any]) -> Any:
+    """
+    Initialize agent from configuration.
+    
+    Args:
+        agent_cfg: Agent configuration dictionary
+        server_processes: List to track server processes
+        
+    Returns:
+        Agent instance or client
+    """
+    logging.info("Initializing agent...")
+    
+    if "Client" in agent_cfg["_target_"]:
+        agent = instantiate(agent_cfg)
+    else:
+        # Define the agent methods that need to be remotely accessible
+        agent_remote_methods = {
+            "act": False, 
+            "reset": False, 
+            "close": False,
+        }
+        _, agent = launch_remote_get_local_handler(
+            agent_cfg, 
+            custom_remote_methods=agent_remote_methods
+        )
+        server_processes.append(_)  # Track the server process
+    
+    logging.info("Agent initialized")
+    return agent
+
+
+def cleanup_processes(agent: Any, server_processes: List[Any]) -> None:
+    """
+    Clean up all processes and connections.
+    
+    Args:
+        agent: Agent instance to close
+        server_processes: List of server processes to terminate
+    """
+    logging.info("Cleaning up processes...")
+    
+    try:
+        agent.close()
+    except Exception as e:
+        logging.warning(f"Error closing agent: {e}")
+    
+    # Terminate server processes
+    for server_process in server_processes:
+        try:
+            if server_process:
+                server_process.kill()
+        except Exception as e:
+            logging.warning(f"Error terminating server process: {e}")
+    
+    logging.info("Cleanup complete") 
