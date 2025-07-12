@@ -17,11 +17,11 @@ class ViserPyrokiAgent(Agent):
         self.right_arm_extrinsic = right_arm_extrinsic
         self.viser_server = viser.ViserServer()
         self.ik = BimanualYamPyroki(viser_server=self.viser_server)
-        self.thread = threading.Thread(target=self.ik.run)
-        self.thread.start()
+        self.ik_thread = threading.Thread(target=self.ik.run)
+        self.ik_thread.start()
         self.obs = None
-        self.real_robot_vis_thread = threading.Thread(target=self._update_visualization)
-        self.real_robot_vis_thread.start()
+        self.real_vis_thread = threading.Thread(target=self._update_visualization)
+        self.real_vis_thread.start()
         self._setup_visualization()
 
 
@@ -47,14 +47,10 @@ class ViserPyrokiAgent(Agent):
         while self.obs is None:
             time.sleep(0.025)
         while True:
-            right_joint_pos = np.flip(self.obs["right"]["joint_pos"])
-            left_joint_pos = np.flip(self.obs["left"]["joint_pos"])
-            self.urdf_vis_right_real.update_cfg(right_joint_pos)
-            self.urdf_vis_left_real.update_cfg(left_joint_pos)
-
+            self.urdf_vis_right_real.update_cfg(np.flip(self.obs["right"]["joint_pos"]))
+            self.urdf_vis_left_real.update_cfg(np.flip(self.obs["left"]["joint_pos"]))
             # self.cam_image.image = self.obs["top_camera"]["images"]["rgb"]
             time.sleep(0.02)
-
 
     def act(self, obs: Dict[str, Any]) -> Any:        
         self.obs = deepcopy(obs)
