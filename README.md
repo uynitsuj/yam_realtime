@@ -17,8 +17,9 @@ python -m pip install -e .
 python -m pip install /dependencies/i2rt/
 ```
 First configure YAM arms CAN chain according to instructions from the [I2RT repo](https://github.com/i2rt-robotics/i2rt)
-```
 
+Then run the launch entrypoint script with an appropriate robot config file:
+```
 python yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
 ```
 
