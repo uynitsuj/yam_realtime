@@ -18,6 +18,7 @@ from yam_realtime.utils.launch_utils import (
     initialize_robots,
     initialize_sensors,
     setup_can_interfaces,
+    setup_logging,
 )
 from yam_realtime.camera.camera import CameraDriver
 from yam_realtime.envs.robot_env import RobotEnv
@@ -51,29 +52,31 @@ def main(args: Args) -> None:
     6. Create environment
     7. Run control loop
     """
-    # Setup logging
-    logging.basicConfig(level=logging.INFO)
+    # Setup logging and get logger
+    logger = setup_logging()
+    logger.info("Starting YAM realtime control system...")
+    
     server_processes = []
     
     try:
-        logging.info("Loading configuration...")
+        logger.info("Loading configuration...")
         configs_dict = DictLoader.load([os.path.expanduser(x) for x in args.config_path])
         
         agent_cfg = configs_dict.pop("agent")
         sensors_cfg = configs_dict.pop("sensors", None)
         main_config = instantiate(configs_dict)
         
-        logging.info("Initializing sensors...")
+        logger.info("Initializing sensors...")
         camera_dict, camera_info = initialize_sensors(sensors_cfg, server_processes)
         
         setup_can_interfaces()
         
-        logging.info("Initializing robots...")
+        logger.info("Initializing robots...")
         robots = initialize_robots(main_config.robots, server_processes)
         
         agent = initialize_agent(agent_cfg, server_processes)
         
-        logging.info("Creating robot environment...")
+        logger.info("Creating robot environment...")
         frequency = main_config.hz
         rate = Rate(frequency, rate_name="control_loop")
         
@@ -83,15 +86,15 @@ def main(args: Args) -> None:
             control_rate_hz=rate,
         )
         
-        logging.info("Starting control loop...")
+        logger.info("Starting control loop...")
         _run_control_loop(env, agent, main_config)
         
     except Exception as e:
-        logging.error(f"Error during execution: {e}")
+        logger.error(f"Error during execution: {e}")
         raise e
     finally:
         # Cleanup
-        logging.info("Shutting down...")
+        logger.info("Shutting down...")
         if 'env' in locals():
             env.close()
         if 'agent' in locals():
@@ -107,13 +110,14 @@ def _run_control_loop(env: RobotEnv, agent, config) -> None:
         agent: Agent instance
         config: Configuration object
     """
+    logger = logging.getLogger(__name__)
     steps = 0
     start_time = time.time()
     loop_count = 0
     
     # Init environment and warm up agent
     obs = env.reset()
-    logging.info(f"Action spec: {env.action_spec()}")
+    logger.info(f"Action spec: {env.action_spec()}")
     agent.act(obs)
     
     # Main control loop
@@ -132,12 +136,12 @@ def _run_control_loop(env: RobotEnv, agent, config) -> None:
         elapsed_time = time.time() - start_time
         if elapsed_time >= 1:
             calculated_frequency = loop_count / elapsed_time
-            logging.info(f"Control loop frequency: {calculated_frequency:.2f} Hz")
+            logger.info(f"Control loop frequency: {calculated_frequency:.2f} Hz")
             start_time = time.time()
             loop_count = 0
         
         if config.max_steps is not None and steps >= config.max_steps:
-            logging.info(f"Reached max steps ({config.max_steps}), stopping...")
+            logger.info(f"Reached max steps ({config.max_steps}), stopping...")
             break
 
 

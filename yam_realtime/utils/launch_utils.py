@@ -20,13 +20,39 @@ from yam_realtime.utils.portal_utils import (
     launch_remote_get_local_handler,
 )
 
+# Create logger for this module
+logger = logging.getLogger(__name__)
+
+
+def setup_logging() -> logging.Logger:
+    """
+    Setup logging configuration.
+    
+    Returns:
+        Logger instance for the main module
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(filename)s:%(lineno)d - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(), 
+        ],
+        force=True  # Force reconfiguration of logging
+    )
+    
+    # Create and return a logger for the main module
+    main_logger = logging.getLogger('__main__')
+    main_logger.setLevel(logging.INFO)
+    
+    return main_logger
+
 
 def setup_can_interfaces():
     """Setup CAN interfaces for robot communication."""
-    logging.info("Setting up CAN interfaces...")
+    logger.info("Setting up CAN interfaces...")
     subprocess.run(["bash", "yam_realtime/scripts/reset_all_can.sh"], check=True)
     time.sleep(0.5)
-    logging.info("CAN interfaces ready")
+    logger.info("CAN interfaces ready")
 
 
 def initialize_sensors(
@@ -47,7 +73,7 @@ def initialize_sensors(
     camera_info = {}
     
     if sensors_cfg is None:
-        logging.info("No sensors configured")
+        logger.info("No sensors configured")
         return camera_dict, camera_info
     
     _launch_remote_get_local_handler = partial(
@@ -59,17 +85,17 @@ def initialize_sensors(
     for sensor_name, sensor_cfg in sensors_cfg.items():
         if sensor_name == "cameras" and sensor_cfg is not None:
             for camera_name, camera_config in sensor_cfg.items():
-                logging.info(f"Initializing camera: {camera_name}")
+                logger.info(f"Initializing camera: {camera_name}")
                 camera_config["camera"]["name"] = camera_name
                 _, client = _launch_remote_get_local_handler(camera_config)
                 camera_dict[camera_name] = client
                 
-                if "get_camera_info" in client.supported_remote_methods:
+                if hasattr(client, 'supported_remote_methods') and "get_camera_info" in client.supported_remote_methods:
                     camera_info[camera_name] = client.get_camera_info()
                 else:
                     raise AttributeError(f"Camera {camera_name} does not implement 'get_camera_info'!")
     
-    logging.info(f"Initialized {len(camera_dict)} cameras")
+    logger.info(f"Initialized {len(camera_dict)} cameras")
     return camera_dict, camera_info
 
 
@@ -90,11 +116,11 @@ def initialize_robots(
     robots = {}
     
     for robot_name, robot_path_or_robot in robots_cfg.items():
-        logging.info(f"Initializing robot: {robot_name}")
+        logger.info(f"Initializing robot: {robot_name}")
         robot_client = _create_robot_client(robot_path_or_robot, server_processes)
         robots[robot_name] = robot_client
     
-    logging.info(f"Initialized {len(robots)} robots")
+    logger.info(f"Initialized {len(robots)} robots")
     return robots
 
 
@@ -120,7 +146,7 @@ def _create_robot_client(
         try:
             robot_dict = DictLoader.load(robot_path_or_robot)
         except Exception as e:
-            logging.error(f"Failed to load robot config: {robot_path_or_robot}")
+            logger.error(f"Failed to load robot config: {robot_path_or_robot}")
             raise
         
         if "Client" in robot_dict["_target_"]:
@@ -162,7 +188,7 @@ def initialize_agent(agent_cfg: Dict[str, Any], server_processes: List[Any]) -> 
     Returns:
         Agent instance or client
     """
-    logging.info("Initializing agent...")
+    logger.info("Initializing agent...")
     
     if "Client" in agent_cfg["_target_"]:
         agent = instantiate(agent_cfg)
@@ -179,7 +205,7 @@ def initialize_agent(agent_cfg: Dict[str, Any], server_processes: List[Any]) -> 
         )
         server_processes.append(_)  # Track the server process
     
-    logging.info("Agent initialized")
+    logger.info("Agent initialized")
     return agent
 
 
@@ -191,12 +217,12 @@ def cleanup_processes(agent: Any, server_processes: List[Any]) -> None:
         agent: Agent instance to close
         server_processes: List of server processes to terminate
     """
-    logging.info("Cleaning up processes...")
+    logger.info("Cleaning up processes...")
     
     try:
         agent.close()
     except Exception as e:
-        logging.warning(f"Error closing agent: {e}")
+        logger.warning(f"Error closing agent: {e}")
     
     # Terminate server processes
     for server_process in server_processes:
@@ -204,6 +230,6 @@ def cleanup_processes(agent: Any, server_processes: List[Any]) -> None:
             if server_process:
                 server_process.kill()
         except Exception as e:
-            logging.warning(f"Error terminating server process: {e}")
+            logger.warning(f"Error terminating server process: {e}")
     
-    logging.info("Cleanup complete") 
+    logger.info("Cleanup complete") 
