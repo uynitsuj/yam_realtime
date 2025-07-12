@@ -1,7 +1,7 @@
 [project]
 name = "yam_realtime"
 version = "0.1.0"
-description = "A collection of realtime & high-frequency control interfaces for I2RT YAM bi-manual robot arms including manual tele-operation"
+description = "A collection of realtime & high-frequency control interfaces for I2RT YAM bi-manual robot arms"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
