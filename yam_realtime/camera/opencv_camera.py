@@ -90,7 +90,7 @@ class OpencvCamera(CameraDriver):
 if __name__ == "__main__":
     import argparse
 
-    from yam_realtime.camera.camera import plot_camera_read
+    from yam_realtime.camera.camera_utils import plot_camera_read
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--device_path", type=str, default="/dev/video-zed2i")

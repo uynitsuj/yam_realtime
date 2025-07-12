@@ -2,10 +2,62 @@
 Camera utility functions for processing observation data.
 """
 
-from typing import Any, Dict, Optional
 import numpy as np
 import cv2
+import os
+from typing import Any, Dict, TypeVar, Union
+from dotdict import dotdict
 
+T = TypeVar("T")
+
+
+def nest_dotdict(d: Union[Dict[str, Any], T]) -> Union[dotdict, T]:
+    """Convert nested dictionary to dotdict."""
+    if isinstance(d, dict):
+        d_dotdict = dotdict(d)
+        for k, v in d_dotdict.items():
+            if isinstance(v, dict):
+                d_dotdict[k] = nest_dotdict(v)
+        return d_dotdict
+    return d
+
+
+def plot_camera_read(camera: Any, save_datastream: bool = False, vis: bool = True) -> None:
+    import cv2
+
+    camera_data = camera.read()
+    if vis:
+        for k in camera_data.images.keys():
+            cv2.namedWindow(k)
+
+    counter = 0
+    if not os.path.exists("images"):
+        os.makedirs("images")
+    if save_datastream and not os.path.exists("stream"):
+        os.makedirs("stream")
+
+    while True:
+        data = camera.read()
+        ts = data.timestamp
+        camera_data = data.images
+
+        key = cv2.waitKey(1)
+        if vis:
+            for k in camera_data.keys():
+                cv2.imshow(k, camera_data[k][..., ::-1])
+                # plot ts on the image
+                cv2.putText(
+                    camera_data[k], f"ts: {ts}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA
+                )
+        if key == ord("s"):
+            for k in camera_data.keys():
+                cv2.imwrite(f"stream/{k}_{counter}.png", camera_data[k])
+        if save_datastream:
+            for k in camera_data.keys():
+                cv2.imwrite(f"stream/{k}_{counter}.png", camera_data[k])
+        counter += 1
+        if key == 27:
+            break
 
 def obs_get_rgb(obs: Dict[str, Any]) -> Dict[str, np.ndarray]:
     """

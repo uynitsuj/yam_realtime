@@ -200,8 +200,9 @@ if __name__ == "__main__":
     top_camera:
         _target_: yam_realtime.camera.camera.CameraNode
         camera:
-            _target_: yam_realtime.camera.camera.DummyCamera
-            name: "test_camera"
+            _target_: yam_realtime.camera.opencv_camera.OpencvCamera
+            device_path: "/dev/video0"
+            camera_type: "realsense_camera"
     """
     import yaml
     from tqdm import tqdm
