@@ -41,7 +41,7 @@ class ViserPyrokiAgent(Agent):
         for mesh in self.urdf_vis_right_real._meshes:
             mesh.opacity = 0.25
 
-        self.cam_image = self.viser_server.gui.add_image(np.zeros((100, 100, 3)), "camera")
+        self.cam_image = self.viser_server.gui.add_image(np.zeros((100, 100, 3)), label="camera")
 
     def _update_visualization(self):
         while self.obs is None:
