@@ -252,28 +252,16 @@ class DummyCamera(CameraDriver):
 if __name__ == "__main__":
     cfg = """
     top_camera:
-        _target_: xdof.camera.camera.CameraNode
+        _target_: yam_realtime.camera.camera.CameraNode
         camera:
-            _target_: xdof.camera.realsense.RealSenseCamera
-            device_id: "427622271499"
-            resolution: [640, 480]
-    left_camera:
-        _target_: xdof.camera.camera.CameraNode
-        camera:
-            _target_: xdof.camera.realsense.RealSenseCamera
-            device_id: "427622272734"
-            resolution: [424, 240]
-    right_camera:
-        _target_: xdof.camera.camera.CameraNode
-        camera:
-            _target_: xdof.camera.realsense.RealSenseCamera
-            device_id: "419122271054"
-            resolution: [424, 240]
+            _target_: yam_realtime.camera.opencv_camera.OpencvCamera
+            device_path: "/dev/video0"
+            camera_type: "realsense_camera"
     """
     import yaml
     from tqdm import tqdm
 
-    from xdof.utils.portal_utils import launch_remote_get_local_handler
+    from yam_realtime.utils.portal_utils import launch_remote_get_local_handler
 
     camera_config = yaml.safe_load(cfg)
     ps, clients = [], []

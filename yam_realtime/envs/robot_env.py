@@ -127,6 +127,6 @@ class RobotEnv(dm_env.Environment):
         assert self._camera_dict is not None, "Camera dictionary is not set."
         for camera_name, client in self._camera_dict.items():
             print(f"closing camera {camera_name}")
-            client.close()
+            client.close()  # type: ignore
 
         print("Environment closed.")
