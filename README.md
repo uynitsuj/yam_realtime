@@ -5,6 +5,7 @@ YAM Realtime is a modular software stack for realtime control, teleoperation, an
 It provides infrastructure for low-latency joint command streaming, extensible agent-based policy control, visualization, and integration with inverse kinematics solvers like [pyroki](https://github.com/chungmin99/pyroki) developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
 
 ![yam_realtime](media/yam_realtime.gif)
+Shown is a web-based real-time visualizer for commanded state and real joint state built with [Viser](https://viser.studio/main/)
 
 ## Installation
 Clone the repository and initialize submodules:
