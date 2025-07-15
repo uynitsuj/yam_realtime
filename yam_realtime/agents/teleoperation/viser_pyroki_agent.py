@@ -1,15 +1,18 @@
-from yam_realtime.agents.agent import Agent
-from yam_realtime.robots.inverse_kinematics.yam_pyroki import YamPyroki
-from typing import Dict, Any, Optional
 import threading
-from yam_realtime.utils.portal_utils import remote
+import time
+from copy import deepcopy
+from typing import Any, Dict, Optional
+
 import numpy as np
-from dm_env.specs import Array
 import viser
 import viser.extras
-from copy import deepcopy
-import time
+from dm_env.specs import Array
+
+from yam_realtime.agents.agent import Agent
+from yam_realtime.robots.inverse_kinematics.yam_pyroki import YamPyroki
 from yam_realtime.sensors.cameras.camera_utils import obs_get_rgb, resize_with_pad
+from yam_realtime.utils.portal_utils import remote
+
 
 class ViserPyrokiAgent(Agent):
 

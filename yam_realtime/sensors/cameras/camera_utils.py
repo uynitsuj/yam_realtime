@@ -2,10 +2,11 @@
 Camera utility functions for processing observation data.
 """
 
-import numpy as np
-import cv2
 import os
 from typing import Any, Dict, TypeVar, Union
+
+import cv2
+import numpy as np
 from dotdict import dotdict
 
 T = TypeVar("T")

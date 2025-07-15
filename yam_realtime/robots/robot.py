@@ -1,8 +1,6 @@
-import time
 from typing import Dict, List, Optional
 
 import numpy as np
-import portal
 from i2rt.robots.robot import Robot
 from i2rt.robots.utils import JointMapper
 
@@ -69,12 +67,12 @@ class ConcatenatedRobot(Robot):
     def command_joint_pos(self, joint_pos: np.ndarray) -> None:
         if self._remapper is not None:
             joint_pos = self._remapper.to_robot_joint_pos_space(joint_pos)
-        for robot, pos in zip(self._robots, np.split(joint_pos, self.per_robot_index)):
+        for robot, pos in zip(self._robots, np.split(joint_pos, self.per_robot_index), strict=False):
             robot.command_joint_pos(pos)
 
     def command_joint_state(self, joint_state: Dict[str, np.ndarray]) -> None:
         assert self._remapper is None, "Remapper is not supported for command_joint_state"
-        for robot, state in zip(self._robots, np.split(joint_state, self.per_robot_index)):  # type: ignore
+        for robot, state in zip(self._robots, np.split(joint_state, self.per_robot_index), strict=False):  # type: ignore
             robot.command_joint_state(state)
 
     def get_observations(self) -> Dict[str, np.ndarray]:

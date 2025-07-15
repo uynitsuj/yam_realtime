@@ -8,6 +8,7 @@ import numpy as np
 
 from yam_realtime.sensors.cameras.camera import CameraData, CameraDriver
 
+
 @dataclass
 class OpencvCamera(CameraDriver):
     """

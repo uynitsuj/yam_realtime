@@ -7,6 +7,7 @@ import numpy as np
 
 from yam_realtime.utils.portal_utils import remote
 
+
 @dataclass
 class IMUData:
     timestamp: float  # relative timestamp in ms

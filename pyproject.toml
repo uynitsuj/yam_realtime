@@ -96,6 +96,11 @@ omit = [
     "*exceptions.py",
 ]
 
+[dependency-groups]
+dev = [
+    "ruff>=0.12.3",
+]
+
 
 [tool.ruff.lint.flake8-annotations]
 ignore-fully-untyped = true

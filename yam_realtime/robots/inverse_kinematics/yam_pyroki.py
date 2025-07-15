@@ -2,11 +2,10 @@
 Bimanual YAM arms Inverse Kinematics Example using PyRoki with ViserAbstractBase.
 """
 
-import time
-from typing import Dict, Optional
+from copy import deepcopy
+from typing import Optional
 
 import numpy as np
-from copy import deepcopy
 
 try:
     import pyroki as pk
@@ -20,8 +19,7 @@ import viser.extras
 import viser.transforms as vtf
 
 from yam_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik import solve_ik
-
-from yam_realtime.robots.viser.viser_base import ViserAbstractBase, TransformHandle
+from yam_realtime.robots.viser.viser_base import TransformHandle, ViserAbstractBase
 
 
 class YamPyroki(ViserAbstractBase):
@@ -88,9 +86,8 @@ class YamPyroki(ViserAbstractBase):
         if self.bimanual:
             if "left" not in target_poses or "right" not in target_poses:
                 return
-        else:
-            if "left" not in target_poses:
-                return
+        elif "left" not in target_poses:
+            return
         
         target_positions = []
         target_wxyzs = []
@@ -135,9 +132,8 @@ class YamPyroki(ViserAbstractBase):
                 return np.concatenate([self.joints["left"], self.joints["right"]])
             else:
                 return None
-        else:
-            if self.joints["left"] is not None:
-                return self.joints["left"]
+        elif self.joints["left"] is not None:
+            return self.joints["left"]
 
 
 def main():

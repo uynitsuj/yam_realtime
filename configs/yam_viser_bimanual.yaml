@@ -1,13 +1,13 @@
 _target_: yam_realtime.envs.launch.LaunchConfig
 
-# sensors:
-#   cameras:
-#     top_camera:
-#         _target_: yam_realtime.sensors.cameras.camera.CameraNode
-#         camera:
-#             _target_: yam_realtime.sensors.cameras.opencv_camera.OpencvCamera
-#             device_path: "/dev/video4"
-#             camera_type: "realsense_camera"
+sensors:
+  cameras:
+    top_camera:
+        _target_: yam_realtime.sensors.cameras.camera.CameraNode
+        camera:
+            _target_: yam_realtime.sensors.cameras.opencv_camera.OpencvCamera
+            device_path: "/dev/video4"
+            camera_type: "realsense_camera"
 
 robots:
   left: ["robot_configs/yam/left.yaml"]

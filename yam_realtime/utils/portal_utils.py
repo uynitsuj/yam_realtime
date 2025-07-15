@@ -8,6 +8,7 @@ import portal
 from yam_realtime.envs.configs.instantiate import instantiate
 from yam_realtime.robots.utils import Timeout
 
+
 def remote(serialization_needed: bool = False) -> Callable:
     """
     Decorator to mark a method as remotely accessible.
@@ -189,7 +190,7 @@ def return_futures(*clients: Client):
         yield  # Yield control to the block
     finally:
         # Restore previous states
-        for client, prev_state in zip(clients, previous_states):
+        for client, prev_state in zip(clients, previous_states, strict=False):
             client.set_use_future(prev_state)
 
 

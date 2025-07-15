@@ -1,14 +1,8 @@
-import csv
 import logging
-import os
 import signal
 import sys
 import time
-from typing import List, Optional
-
-import numpy as np
-
-from yam_realtime.robots.robot import Robot
+from typing import Optional
 
 TIMEOUT_INIT = False
 

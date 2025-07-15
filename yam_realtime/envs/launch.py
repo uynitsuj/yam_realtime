@@ -6,12 +6,16 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import tyro
 
 from yam_realtime.envs.configs.instantiate import instantiate
 from yam_realtime.envs.configs.loader import DictLoader
+from yam_realtime.envs.robot_env import RobotEnv
+from yam_realtime.robots.robot import Robot
+from yam_realtime.robots.utils import Rate, Timeout
+from yam_realtime.sensors.cameras.camera import CameraDriver
 from yam_realtime.utils.launch_utils import (
     cleanup_processes,
     initialize_agent,
@@ -20,10 +24,7 @@ from yam_realtime.utils.launch_utils import (
     setup_can_interfaces,
     setup_logging,
 )
-from yam_realtime.sensors.cameras.camera import CameraDriver
-from yam_realtime.envs.robot_env import RobotEnv
-from yam_realtime.robots.robot import Robot
-from yam_realtime.robots.utils import Rate, Timeout
+
 
 @dataclass
 class LaunchConfig:

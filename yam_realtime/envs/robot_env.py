@@ -2,12 +2,11 @@ import time
 from typing import Any, Dict, Optional, Union
 
 import dm_env
-import numpy as np
 from i2rt.robots.robot import RobotType
 
-from yam_realtime.sensors.cameras.camera import CameraDriver
 from yam_realtime.robots.robot import Robot
 from yam_realtime.robots.utils import Rate
+from yam_realtime.sensors.cameras.camera import CameraDriver
 from yam_realtime.utils.portal_utils import return_futures
 
 
