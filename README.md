@@ -44,10 +44,9 @@ class MyAgent(Agent):
 Add your agent to your YAML config so the launcher knows which controller to instantiate.
 
 Examples of agents you might implement:
-
-- Teleoperation controller
+- Leader arm or VR controller teleoperation
 - Learned policy (e.g., Diffusion Policy, ACT, PI0)
-- Scripted trajectory player
+- Offline motion-planner + scripted trajectory player
 
 ## TODOS
 
