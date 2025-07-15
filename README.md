@@ -32,7 +32,7 @@ First configure YAM arms CAN chain according to instructions from the [I2RT repo
 ## Launch
 Then run the launch entrypoint script with an appropriate robot config file:
 ```
-uv run yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
+python yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
 ```
 ## Extending with Custom Agents
 To integrate your own controller or policy:
