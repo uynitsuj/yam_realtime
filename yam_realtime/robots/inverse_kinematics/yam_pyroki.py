@@ -12,7 +12,7 @@ try:
     import pyroki as pk
 except ImportError:
     print("ImportError: pyroki not found:")
-    print("pip install git+https://github.com/chungmin99/pyroki.git")
+    print("uv pip install git+https://github.com/chungmin99/pyroki.git")
     exit()
 
 import viser

@@ -9,3 +9,5 @@
 *.pyzw
 *.pyzwz
 __pycache__/
+uv.lock
+.venv/

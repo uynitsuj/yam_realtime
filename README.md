@@ -17,11 +17,14 @@ If you already cloned it without --recurse-submodules, run:
 ```
 git submodule update --init --recursive
 ```
-Install the main package and I2RT repo for CAN driver interface:
+Install the main package and I2RT repo for CAN driver interface using uv:
 ```
 cd yam_realtime
-python -m pip install -e .
-python -m pip install dependencies/i2rt/
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv venv --python 3.11
+source .venv/bin/activate
+uv pip install -e .
+uv pip install dependencies/i2rt/
 ```
 ## Configuration
 First configure YAM arms CAN chain according to instructions from the [I2RT repo](https://github.com/i2rt-robotics/i2rt)
@@ -29,7 +32,7 @@ First configure YAM arms CAN chain according to instructions from the [I2RT repo
 ## Launch
 Then run the launch entrypoint script with an appropriate robot config file:
 ```
-python yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
+uv run yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
 ```
 ## Extending with Custom Agents
 To integrate your own controller or policy:
