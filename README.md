@@ -26,8 +26,6 @@ python -m pip install dependencies/i2rt/
 # Configuration
 First configure YAM arms CAN chain according to instructions from the [I2RT repo](https://github.com/i2rt-robotics/i2rt)
 
-Your robot-specific configuration (joint limits, CAN IDs, kinematics parameters) should be defined in a YAML file under `configs/`.
-
 # Launch
 Then run the launch entrypoint script with an appropriate robot config file:
 ```
