@@ -15,7 +15,6 @@ from yam_realtime.utils.portal_utils import remote
 
 
 class ViserPyrokiAgent(Agent):
-
     def __init__(self, bimanual: bool = False, right_arm_extrinsic: Optional[Dict[str, Any]] = None):
         self.right_arm_extrinsic = right_arm_extrinsic
         self.bimanual = bimanual
@@ -32,20 +31,36 @@ class ViserPyrokiAgent(Agent):
 
     def _setup_visualization(self):
         self.base_frame_left_real = self.viser_server.scene.add_frame("/base_left_real", show_axes=False)
-        self.urdf_vis_left_real = viser.extras.ViserUrdf(self.viser_server, deepcopy(self.ik.urdf), root_node_name="/base_left_real", mesh_color_override=(0.8, 0.5, 0.5))
+        self.urdf_vis_left_real = viser.extras.ViserUrdf(
+            self.viser_server,
+            deepcopy(self.ik.urdf),
+            root_node_name="/base_left_real",
+            mesh_color_override=(0.8, 0.5, 0.5),
+        )
         for mesh in self.urdf_vis_left_real._meshes:
             mesh.opacity = 0.25  # type: ignore
-        self.left_gripper_slider_handle = self.viser_server.gui.add_slider("Left Gripper", min=0.0, max=2.4, step=0.01, initial_value=0.0)
+        self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
+            "Left Gripper", min=0.0, max=2.4, step=0.01, initial_value=0.0
+        )
 
         if self.bimanual and self.right_arm_extrinsic is not None:
             self.ik.base_frame_right.position = np.array(self.right_arm_extrinsic["position"])
             self.ik.base_frame_right.wxyz = np.array(self.right_arm_extrinsic["rotation"])
-            self.base_frame_right_real = self.viser_server.scene.add_frame("/base_left_real/base_right_real", show_axes=False)
+            self.base_frame_right_real = self.viser_server.scene.add_frame(
+                "/base_left_real/base_right_real", show_axes=False
+            )
             self.base_frame_right_real.position = self.ik.base_frame_right.position
-            self.urdf_vis_right_real = viser.extras.ViserUrdf(self.viser_server, deepcopy(self.ik.urdf), root_node_name="/base_left_real/base_right_real", mesh_color_override=(0.8, 0.5, 0.5))
+            self.urdf_vis_right_real = viser.extras.ViserUrdf(
+                self.viser_server,
+                deepcopy(self.ik.urdf),
+                root_node_name="/base_left_real/base_right_real",
+                mesh_color_override=(0.8, 0.5, 0.5),
+            )
             for mesh in self.urdf_vis_right_real._meshes:
                 mesh.opacity = 0.25  # type: ignore
-            self.right_gripper_slider_handle = self.viser_server.gui.add_slider("Right Gripper", min=0.0, max=2.4, step=0.01, initial_value=0.0)
+            self.right_gripper_slider_handle = self.viser_server.gui.add_slider(
+                "Right Gripper", min=0.0, max=2.4, step=0.01, initial_value=0.0
+            )
 
         self.viser_cam_img_handles = {}
 
@@ -68,16 +83,18 @@ class ViserPyrokiAgent(Agent):
 
             time.sleep(0.02)
 
-    def act(self, obs: Dict[str, Any]) -> Any:        
+    def act(self, obs: Dict[str, Any]) -> Any:
         self.obs = deepcopy(obs)
-        
+
         action = {
             "left": {
                 "pos": np.concatenate([np.flip(self.ik.joints["left"]), [self.left_gripper_slider_handle.value]]),
             }
         }
         if self.bimanual:
-            assert self.ik.joints.keys() == {"left", "right"}, "bimanual mode must have both left and right joint ik solved"
+            assert self.ik.joints.keys() == {"left", "right"}, (
+                "bimanual mode must have both left and right joint ik solved"
+            )
             action["right"] = {
                 "pos": np.concatenate([np.flip(self.ik.joints["right"]), [self.right_gripper_slider_handle.value]]),
             }

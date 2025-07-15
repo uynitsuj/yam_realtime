@@ -17,7 +17,7 @@ class AsyncDiffusionAgent(PolicyAgent):
         self,
     ) -> None:
         super().__init__()
-        
+
     def load_model(self, folder_path: Union[str, Path], step: Optional[int] = None, bfloat16: bool = False) -> None:
         raise NotImplementedError
 
@@ -30,7 +30,7 @@ class AsyncDiffusionAgent(PolicyAgent):
     @remote()
     def act(self, obs):
         action = reverse_flatten(self(obs))["action"]
-        
+
         return {
             "left": {"pos": action["left"]["pos"]},
             "right": {"pos": action["right"]["pos"]},
@@ -64,4 +64,3 @@ class AsyncDiffusionAgent(PolicyAgent):
             # add latest observation to deque
             self.obs_deque.append(obs)
         raise NotImplementedError
-

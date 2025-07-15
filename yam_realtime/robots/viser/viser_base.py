@@ -21,6 +21,7 @@ class TransformHandle:
     tcp_offset_frame: viser.FrameHandle
     control: Optional[viser.TransformControlsHandle] = None
 
+
 class ViserAbstractBase(ABC):
     """
     Abstract base class for bimanual robot visualization.
@@ -63,7 +64,9 @@ class ViserAbstractBase(ABC):
     def _setup_gui(self):
         """Setup GUI elements."""
         self.timing_handle = self.viser_server.gui.add_number("Time (ms)", 0.01, disabled=True)
-        self.tf_size_handle = self.viser_server.gui.add_slider("Gizmo size", min=0.05, max=0.4, step=0.01, initial_value=0.2)
+        self.tf_size_handle = self.viser_server.gui.add_slider(
+            "Gizmo size", min=0.05, max=0.4, step=0.01, initial_value=0.2
+        )
         self.reset_button = self.viser_server.gui.add_button("Reset to Rest Pose")
 
         @self.reset_button.on_click
@@ -85,7 +88,9 @@ class ViserAbstractBase(ABC):
                 tcp_offset_frame=self.viser_server.scene.add_frame(
                     "target_right/tcp_offset", show_axes=False, position=(0.0, 0.0, 0.0), wxyz=(1, 0, 0, 0)
                 ),
-                control=self.viser_server.scene.add_transform_controls("target_right", scale=self.tf_size_handle.value),
+                control=self.viser_server.scene.add_transform_controls(
+                    "target_right", scale=self.tf_size_handle.value
+                ),
             )
 
         @self.tf_size_handle.on_update
@@ -109,7 +114,7 @@ class ViserAbstractBase(ABC):
 
     def update_visualization(self):
         """Update visualization with current state."""
-        self.urdf_vis_left.update_cfg(self.joints["left"]) 
+        self.urdf_vis_left.update_cfg(self.joints["left"])
 
     def get_target_poses(self):
         """Get target poses from transform controls."""

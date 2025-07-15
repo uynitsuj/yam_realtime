@@ -51,6 +51,14 @@ Examples of agents you might implement:
 - Learned policy (e.g., Diffusion Policy, ACT, PI0)
 - Offline motion-planner + scripted trajectory player
 
+## Linting
+If contributing, please use ruff (automatically installed) for linting (https://docs.astral.sh/ruff/tutorial/#getting-started)
+```bash
+ruff check # lint
+ruff check --fix # lint and fix anything fixable
+ruff format # code format
+```
+
 ## Roadmap/Todos
 
 - [ ] Add data logging infrastructure

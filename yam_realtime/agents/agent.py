@@ -28,6 +28,7 @@ class Agent(Protocol):
         """
         raise NotImplementedError
 
+
 @dataclass
 class PolicyAgent(Agent):
     use_joint_state_as_action: bool = False
@@ -51,4 +52,3 @@ class PolicyAgent(Agent):
             action_spec: dictionary of action specification.
         """
         raise NotImplementedError
-

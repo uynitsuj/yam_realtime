@@ -49,6 +49,7 @@ class PrintRobot(Robot):
             "joint_vel": joint_pos,
         }
 
+
 class ConcatenatedRobot(Robot):
     def __init__(self, robots: List[Robot], remapper: Optional[JointMapper] = None):
         self._robots = robots
