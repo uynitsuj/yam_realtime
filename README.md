@@ -23,15 +23,15 @@ cd yam_realtime
 python -m pip install -e .
 python -m pip install dependencies/i2rt/
 ```
-# Configuration
+## Configuration
 First configure YAM arms CAN chain according to instructions from the [I2RT repo](https://github.com/i2rt-robotics/i2rt)
 
-# Launch
+## Launch
 Then run the launch entrypoint script with an appropriate robot config file:
 ```
 python yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
 ```
-# Extending with Custom Agents
+## Extending with Custom Agents
 To integrate your own controller or policy:
 
 Subclass the base agent interface:
@@ -48,7 +48,7 @@ Examples of agents you might implement:
 - Learned policy (e.g., Diffusion Policy, ACT, PI0)
 - Offline motion-planner + scripted trajectory player
 
-## TODOS
+## Roadmap/Todos
 
 - [ ] Add data logging infrastructure
 - [ ] Implement a [Diffusion Policy](https://diffusion-policy.cs.columbia.edu/) agent controller
