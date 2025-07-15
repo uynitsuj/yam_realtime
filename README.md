@@ -2,7 +2,7 @@
 
 YAM Realtime is a modular software stack for realtime control, teleoperation, and policy integration on bi-manual I2RT YAM arms.
 
-It provides infrastructure for low-latency joint command streaming, extensible agent-based policy control, visualization, and integration with inverse kinematics solvers like [pyroki](https://github.com/chungmin99/pyroki) developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
+It provides pythonic infrastructure for low-latency joint command streaming, extensible agent-based policy control, visualization, and integration with inverse kinematics solvers like [pyroki](https://github.com/chungmin99/pyroki) developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
 
 ![yam_realtime](media/yam_realtime.gif)
 
