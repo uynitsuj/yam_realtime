@@ -14,9 +14,9 @@ import portal
 from yam_realtime.envs.configs.instantiate import instantiate
 from yam_realtime.envs.configs.loader import DictLoader
 from yam_realtime.robots.robot import ROBOT_PROTOCOL_METHODS, Robot
-from yam_realtime.utils.portal_utils import RemoteServer
 from yam_realtime.utils.portal_utils import (
     Client,
+    RemoteServer,
     launch_remote_get_local_handler,
 )
 

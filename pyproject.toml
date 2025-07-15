@@ -71,7 +71,7 @@ lint.ignore = [
     "RUF009"
 ]
 lint.extend-select = ["E501"]
-lint.exclude = ["*.ipynb"]
+exclude = ["*.ipynb", "dependencies/*"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -100,7 +100,6 @@ omit = [
 dev = [
     "ruff>=0.12.3",
 ]
-
 
 [tool.ruff.lint.flake8-annotations]
 ignore-fully-untyped = true
