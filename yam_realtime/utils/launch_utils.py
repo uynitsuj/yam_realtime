@@ -9,10 +9,12 @@ from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import omegaconf
+import portal
 
 from yam_realtime.envs.configs.instantiate import instantiate
 from yam_realtime.envs.configs.loader import DictLoader
 from yam_realtime.robots.robot import ROBOT_PROTOCOL_METHODS, Robot
+from yam_realtime.utils.portal_utils import RemoteServer
 from yam_realtime.utils.portal_utils import (
     Client,
     launch_remote_get_local_handler,
@@ -159,11 +161,9 @@ def _create_robot_client(
     
     elif isinstance(robot_path_or_robot, Robot):
         # Handle robot instance - create remote server
-        import portal
         port = portal.free_port()
         
         def _launch_robot_server(robot: Any, port: int) -> None:
-            from yam_realtime.utils.portal_utils import RemoteServer
             remote_server = RemoteServer(robot, port, custom_remote_methods=ROBOT_PROTOCOL_METHODS)
             remote_server.serve()
         

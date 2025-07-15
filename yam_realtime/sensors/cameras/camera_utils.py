@@ -5,9 +5,10 @@ Camera utility functions for processing observation data.
 import os
 from typing import Any, Dict, TypeVar, Union
 
-import cv2
 import numpy as np
 from dotdict import dotdict
+
+import cv2
 
 T = TypeVar("T")
 
@@ -24,8 +25,6 @@ def nest_dotdict(d: Union[Dict[str, Any], T]) -> Union[dotdict, T]:
 
 
 def plot_camera_read(camera: Any, save_datastream: bool = False, vis: bool = True) -> None:
-    import cv2
-
     camera_data = camera.read()
     if vis:
         for k in camera_data.images.keys():

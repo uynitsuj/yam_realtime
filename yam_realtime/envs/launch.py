@@ -10,6 +10,7 @@ from typing import Dict, Optional, Tuple, Union
 
 import tyro
 
+from yam_realtime.agents.agent import Agent
 from yam_realtime.envs.configs.instantiate import instantiate
 from yam_realtime.envs.configs.loader import DictLoader
 from yam_realtime.envs.robot_env import RobotEnv
@@ -102,7 +103,7 @@ def main(args: Args) -> None:
             cleanup_processes(agent, server_processes)
 
 
-def _run_control_loop(env: RobotEnv, agent, config) -> None:
+def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None:
     """
     Run the main control loop.
     

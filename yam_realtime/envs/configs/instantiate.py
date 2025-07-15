@@ -2,7 +2,11 @@ import dataclasses
 import logging
 import pydoc
 from collections import abc
+from importlib import import_module
+from types import ModuleType
 from typing import Any
+
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 
 def _convert_target_to_string(t: Any) -> str:
@@ -67,8 +71,6 @@ def locate(name: str) -> Any:
         """
         if path == "":
             raise ImportError("Empty path")
-        from importlib import import_module
-        from types import ModuleType
 
         parts = [part for part in path.split(".")]
         for part in parts:
@@ -154,7 +156,6 @@ def instantiate(cfg: Any) -> Any:
     Returns:
         object instantiated by cfg
     """
-    from omegaconf import DictConfig, ListConfig, OmegaConf
 
     if isinstance(cfg, ListConfig):
         lst = [instantiate(x) for x in cfg]

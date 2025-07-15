@@ -1,15 +1,9 @@
 # type: ignore
 import collections
-import os
-import threading
-import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
-import torch
-import tyro
 from dm_env.specs import Array
 
 from yam_realtime.agents.agent import PolicyAgent
@@ -22,6 +16,7 @@ class AsyncDiffusionAgent(PolicyAgent):
     def __init__(
         self,
     ) -> None:
+        super().__init__()
         
     def load_model(self, folder_path: Union[str, Path], step: Optional[int] = None, bfloat16: bool = False) -> None:
         raise NotImplementedError
