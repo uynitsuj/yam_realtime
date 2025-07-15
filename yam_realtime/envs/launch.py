@@ -26,6 +26,7 @@ from yam_realtime.utils.launch_utils import (
     setup_logging,
 )
 
+
 @dataclass
 class LaunchConfig:
     hz: float = 30.0
