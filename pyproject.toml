@@ -18,6 +18,7 @@ dependencies = [
     "dotdict==0.1",
     "numpy==1.26.4",
     "robot_descriptions",
+    "ruff",
     "pyroki @ git+https://github.com/chungmin99/pyroki.git",
 ]
 
