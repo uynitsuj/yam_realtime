@@ -10,15 +10,13 @@ Shown is a headless-capable web-based real-time visualizer and controller for vi
 
 ## Installation
 Clone the repository and initialize submodules:
-```
+```bash
 git clone --recurse-submodules https://github.com/uynitsuj/yam_realtime.git
-```
-If you already cloned it without --recurse-submodules, run:
-```
+# Or if already cloned it without --recurse-submodules, run:
 git submodule update --init --recursive
 ```
 Install the main package and I2RT repo for CAN driver interface using uv:
-```
+```bash
 cd yam_realtime
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv --python 3.11
@@ -31,7 +29,7 @@ First configure YAM arms CAN chain according to instructions from the [I2RT repo
 
 ## Launch
 Then run the launch entrypoint script with an appropriate robot config file:
-```
+```bash
 python yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
 ```
 ## Extending with Custom Agents
