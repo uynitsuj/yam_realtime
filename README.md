@@ -12,7 +12,7 @@ Shown is a headless-capable web-based real-time visualizer and controller for vi
 Clone the repository and initialize submodules:
 ```bash
 git clone --recurse-submodules https://github.com/uynitsuj/yam_realtime.git
-# Or if already cloned it without --recurse-submodules, run:
+# Or if already cloned without --recurse-submodules, run:
 git submodule update --init --recursive
 ```
 Install the main package and I2RT repo for CAN driver interface using uv:
