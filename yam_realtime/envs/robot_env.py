@@ -5,7 +5,7 @@ import dm_env
 import numpy as np
 from i2rt.robots.robot import RobotType
 
-from yam_realtime.camera.camera import CameraDriver
+from yam_realtime.sensors.cameras.camera import CameraDriver
 from yam_realtime.robots.robot import Robot
 from yam_realtime.robots.utils import Rate
 from yam_realtime.utils.portal_utils import return_futures
@@ -19,7 +19,7 @@ class RobotEnv(dm_env.Environment):
         self,
         robot_dict: Dict[str, Robot],
         camera_dict: Optional[Dict[str, CameraDriver]] = None,
-        control_rate_hz: Union[Rate, float] = 100.0,  # TODO: do we still need this?
+        control_rate_hz: Union[Rate, float] = 100.0,
         use_joint_state_as_action: bool = False,
     ) -> None:
         self._robot_dict = robot_dict

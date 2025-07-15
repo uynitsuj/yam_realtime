@@ -9,7 +9,7 @@ import yaml
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 # from omegaconf import SCMode
-from yam_realtime.configs.instantiate import _convert_target_to_string
+from yam_realtime.envs.configs.instantiate import _convert_target_to_string
 
 
 def _visit_dict_config(cfg: Union[DictConfig, ListConfig, Any], func: Any) -> None:  # type: ignore

@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import omegaconf
 
-from yam_realtime.configs.instantiate import instantiate
-from yam_realtime.configs.loader import DictLoader
+from yam_realtime.envs.configs.instantiate import instantiate
+from yam_realtime.envs.configs.loader import DictLoader
 from yam_realtime.robots.robot import ROBOT_PROTOCOL_METHODS, Robot
 from yam_realtime.utils.portal_utils import (
     Client,

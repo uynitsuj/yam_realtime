@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import portal
 
-from yam_realtime.configs.instantiate import instantiate
+from yam_realtime.envs.configs.instantiate import instantiate
 from yam_realtime.robots.utils import Timeout
 
 def remote(serialization_needed: bool = False) -> Callable:
