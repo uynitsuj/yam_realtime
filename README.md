@@ -2,7 +2,7 @@
 
 YAM Realtime is a modular software stack for realtime control, teleoperation, and policy integration on bi-manual I2RT YAM arms.
 
-It provides infrastructure for low-latency joint command streaming, extensible agent-based policy control, visualization, and integration with inverse kinematics solvers like the [pyroki](https://github.com/chungmin99/pyroki) differential IK library developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
+It provides infrastructure for low-latency joint command streaming, extensible agent-based policy control, visualization, and integration with inverse kinematics solvers like [pyroki](https://github.com/chungmin99/pyroki) developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
 
 ![yam_realtime](media/yam_realtime.gif)
 
@@ -15,7 +15,7 @@ If you already cloned it without --recurse-submodules, run:
 ```
 git submodule update --init --recursive
 ```
-Install the main package and I2RT repo for lower-level CAN drivers:
+Install the main package and I2RT repo for CAN driver interface:
 ```
 cd yam_realtime
 python -m pip install -e .
@@ -24,7 +24,7 @@ python -m pip install dependencies/i2rt/
 # Configuration
 First configure YAM arms CAN chain according to instructions from the [I2RT repo](https://github.com/i2rt-robotics/i2rt)
 
-Your robot-specific configuration (joint limits, CAN IDs, kinematics parameters) should be defined in a YAML file under configs/.
+Your robot-specific configuration (joint limits, CAN IDs, kinematics parameters) should be defined in a YAML file under `configs/`.
 
 # Launch
 Then run the launch entrypoint script with an appropriate robot config file:
