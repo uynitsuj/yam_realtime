@@ -6,7 +6,7 @@ It provides infrastructure for low-latency joint command streaming, extensible a
 
 ![yam_realtime](media/yam_realtime.gif)
 
-Shown is a web-based real-time visualizer for commanded state and real joint state built with [Viser](https://viser.studio/main/)
+Shown is a headless-capable web-based real-time visualizer and controller for viewing commanded joint state and actual robot state, built with [Viser](https://viser.studio/main/)
 
 ## Installation
 Clone the repository and initialize submodules:
