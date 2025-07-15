@@ -11,13 +11,7 @@ import numpy as np
 import viser
 import viser.extras
 import viser.transforms as vtf
-
-try:
-    from robot_descriptions.loaders.yourdfpy import load_robot_description as load_urdf_robot_description
-except ImportError:
-    print("ImportError: robot_descriptions not found:")
-    print("pip install git+https://github.com/robot-descriptions/robot_descriptions.py.git@c99c3322c7bfdea65de4c8294573a823d0748bc3")
-    exit()
+from robot_descriptions.loaders.yourdfpy import load_robot_description as load_urdf_robot_description
 
 
 @dataclass
