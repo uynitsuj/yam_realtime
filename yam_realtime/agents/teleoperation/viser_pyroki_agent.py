@@ -9,7 +9,7 @@ import viser
 import viser.extras
 from copy import deepcopy
 import time
-from yam_realtime.camera.camera_utils import obs_get_rgb, resize_with_pad
+from yam_realtime.sensors.cameras.camera_utils import obs_get_rgb, resize_with_pad
 
 class ViserPyrokiAgent(Agent):
 
