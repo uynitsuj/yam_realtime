@@ -3,17 +3,10 @@ Bimanual YAM arms Inverse Kinematics Example using PyRoki with ViserAbstractBase
 """
 
 from copy import deepcopy
-from typing import Optional
+from typing import Literal, Optional
 
 import numpy as np
-
-try:
-    import pyroki as pk
-except ImportError:
-    print("ImportError: pyroki not found:")
-    print("uv pip install git+https://github.com/chungmin99/pyroki.git")
-    exit()
-
+import pyroki as pk
 import viser
 import viser.extras
 import viser.transforms as vtf
@@ -25,6 +18,7 @@ from yam_realtime.robots.viser.viser_base import TransformHandle, ViserAbstractB
 class YamPyroki(ViserAbstractBase):
     """
     YAM robot visualization using PyRoki for inverse kinematics.
+    Enhanced with coordinate frame support, TCP offset controls, and performance optimizations.
     """
 
     def __init__(
@@ -32,10 +26,15 @@ class YamPyroki(ViserAbstractBase):
         rate: float = 100.0,
         viser_server: Optional[viser.ViserServer] = None,
         bimanual: bool = False,
+        coordinate_frame: Literal["base", "world"] = "base",
     ):
         self.robot: Optional[pk.Robot] = None
         self.target_link_names = ["link_6"]
         self.joints = {"left": np.zeros(6)}
+        self.coordinate_frame = coordinate_frame
+        self.has_jitted_left = False
+        self.has_jitted_right = False
+
         if bimanual:
             self.target_link_names = self.target_link_names * 2
             self.joints["right"] = np.zeros(6)
@@ -53,8 +52,16 @@ class YamPyroki(ViserAbstractBase):
     def _setup_solver_specific(self):
         """Setup PyRoki-specific components."""
         self.robot = pk.Robot.from_urdf(self.urdf)
-
         self.rest_pose = self.urdf.cfg
+
+    def _setup_gui(self):
+        """Setup GUI elements."""
+        super()._setup_gui()
+
+        # Add timing displays for each arm
+        self.timing_handle_left = self.viser_server.gui.add_number("Left Arm Time (ms)", 0.01, disabled=True)
+        if self.bimanual:
+            self.timing_handle_right = self.viser_server.gui.add_number("Right Arm Time (ms)", 0.01, disabled=True)
 
     def _initialize_transform_handles(self):
         """Initialize transform handle positions for arm IK targets."""
@@ -89,6 +96,21 @@ class YamPyroki(ViserAbstractBase):
     def _update_optional_handle_sizes(self):
         """Update optional handle sizes (none for this implementation)."""
         pass
+
+    def get_target_poses(self):
+        """Get target poses with optional TCP offset applied."""
+        target_poses = {}
+
+        for side, handle in self.transform_handles.items():
+            if handle.control is None:
+                continue
+
+            # Combine control handle with TCP offset
+            control_tf = vtf.SE3(np.array([*handle.control.wxyz, *handle.control.position]))
+            tcp_offset_tf = vtf.SE3(np.array([*handle.tcp_offset_frame.wxyz, *handle.tcp_offset_frame.position]))
+            target_poses[side] = control_tf @ tcp_offset_tf
+
+        return target_poses
 
     def solve_ik(self):
         """Solve inverse kinematics for arm IK targets."""
@@ -127,9 +149,9 @@ class YamPyroki(ViserAbstractBase):
 
     def home(self):
         """Reset both arms to rest pose."""
-        self.joints["left"] = self.rest_pose
+        self.joints["left"] = self.rest_pose.copy()
         if self.bimanual:
-            self.joints["right"] = self.rest_pose
+            self.joints["right"] = self.rest_pose.copy()
 
         self._initialize_transform_handles()
 
@@ -147,10 +169,19 @@ class YamPyroki(ViserAbstractBase):
         elif self.joints["left"] is not None:
             return self.joints["left"]
 
+    # Convenience methods for unified interface
+    def solve_ik_world(self, target_positions, target_wxyzs=None):
+        """Convenience method for IK with world coordinate targets."""
+        return self.solve_ik_with_targets(target_positions, target_wxyzs, coordinate_frame="world")
+
+    def solve_ik_base(self, target_positions, target_wxyzs=None):
+        """Convenience method for IK with base coordinate targets."""
+        return self.solve_ik_with_targets(target_positions, target_wxyzs, coordinate_frame="base")
+
 
 def main():
     """Main function for YAM IK visualization."""
-    viz = YamPyroki(rate=100.0)
+    viz = YamPyroki(rate=100.0, bimanual=True)
     viz.run()
 
 
