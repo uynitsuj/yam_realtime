@@ -149,7 +149,7 @@ class ViserAbstractBase(ABC):
             control_tf = vtf.SE3(np.array([*handle.control.wxyz, *handle.control.position]))
             tcp_offset_tf = vtf.SE3(np.array([*handle.tcp_offset_frame.wxyz, *handle.tcp_offset_frame.position]))
             target_poses[side] = control_tf @ tcp_offset_tf
-            
+
         return target_poses
 
     def set_ee_targets(self, left_wxyz_xyz: np.ndarray, right_wxyz_xyz: np.ndarray):
