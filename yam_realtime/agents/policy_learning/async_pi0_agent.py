@@ -10,12 +10,12 @@ from openpi_client import action_chunk_broker, image_tools
 from openpi_client import websocket_client_policy as _websocket_client_policy
 from openpi_client.runtime.agents import policy_agent as _policy_agent
 
-from xdof.agents.agent import PolicyAgent
-from xdof.agents.constants import ActionSpec
-from xdof.data.data_utils import open_trajectory, recusive_flatten, reverse_flatten
-from xdof.learning.diffusion_policy.policy_network import ModelConfig
-from xdof.robots.utils import Rate
-from xdof.utils.portal_utils import remote
+from yam_realtime.agents.agent import PolicyAgent
+from yam_realtime.agents.constants import ActionSpec
+from yam_realtime.data.data_utils import recusive_flatten
+from yam_realtime.learning.diffusion_policy.policy_network import ModelConfig
+from yam_realtime.robots.utils import Rate
+from yam_realtime.utils.portal_utils import remote
 
 
 class AsyncDiffusionAgent(PolicyAgent):
