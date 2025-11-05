@@ -19,8 +19,9 @@ Install the main package and I2RT repo for CAN driver interface using uv:
 ```bash
 cd yam_realtime
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv --python 3.11
 source .venv/bin/activate
+
+uv venv --python 3.11
 uv pip install -e .
 uv pip install dependencies/i2rt/
 ```

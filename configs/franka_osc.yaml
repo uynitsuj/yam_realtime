@@ -1,0 +1,17 @@
+_target_: xdof.envs.launch.LaunchConfig
+
+sensors:
+  cameras:
+
+robots:
+  left: ["robot_configs/franka/franka_no_gripper.yaml"]
+
+agent:
+  _target_: yam_realtime.agents.teleoperation.franka_pyroki_viser_agent.FrankaPyrokiViserAgent
+
+station_metadata:
+  world_frame: "base"
+  station_layout_version: "0.1.0"
+  arm_type: "franka"
+  gripper_version: "0.1.0"
+  station_name: "us_02"
