@@ -5,3 +5,4 @@ robots:
   # mock a fake gripper
   - _target_: robots_realtime.robots.robot.PrintRobot
     num_dofs: 1
+    dont_print: true
