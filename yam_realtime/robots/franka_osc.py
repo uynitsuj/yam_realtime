@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 from i2rt.utils.utils import RateRecorder
+from i2rt.robots.robot import Robot
 from scipy.spatial.transform import Rotation as R
 
 from yam_realtime.robots.utils import Rate
@@ -16,16 +17,18 @@ logger = logging.getLogger(__name__)
 ###############################################################################
 # Single Kp, Kd for both position and orientation in OSC
 ###############################################################################
-KP_OSC = 80.0
-KD_OSC = 18.0
+KP_OSC = 5.0
+KD_OSC = 1.0
 
 # We'll build 6D arrays for the translational + rotational dimensions:
 KP_6D = np.full(6, KP_OSC)  # [100, 100, 100, 100, 100, 100]
 KD_6D = np.full(6, KD_OSC)  # [ 20,  20,  20,  20,  20,  20]
 
 # Joint impedance for null space (example, can be changed)
-Kp_null = np.array([75.0, 75.0, 50.0, 50.0, 40.0, 25.0, 25.0])
-damping_ratio = 1.0
+# Kp_null = np.array([75.0, 75.0, 50.0, 50.0, 40.0, 25.0, 25.0])
+# Kp_null = np.array([30.0, 30.0, 25.0, 25.0, 20.0, 10.0, 10.0])
+Kp_null = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+damping_ratio = 8.0
 Kd_null = damping_ratio * 2.0 * np.sqrt(Kp_null)
 
 
@@ -39,7 +42,7 @@ def orientation_error(current_rot: np.ndarray, desired_rot: np.ndarray) -> np.nd
     return q_err.as_rotvec()
 
 
-class FrankaPanda:
+class FrankaPanda(Robot):
     def __init__(
         self,
         host_name: str = "172.16.0.2",
@@ -121,7 +124,6 @@ class FrankaPanda:
 
     def run(self) -> None:
         rate = Rate(300, rate_name="franka_osc_control_loop")
-        # 1000hz will block the pulling thread, causing huge data timing gap, so we use 300hz
         with RateRecorder(name=self) as rec:
             with self.interface.create_context(frequency=300) as ctx:
                 while not self._stop_event.is_set():
@@ -184,6 +186,9 @@ class FrankaPanda:
 
                     # command torque
                     tau = tau_task + tau_null
+                    # print(f"tau: {tau}")
+                    # tau = np.clip(tau, -1, 1)
+                    print(f"tau: {tau}")
                     self.ctrl.set_control(tau)
 
                     if self._joint_state_saver is not None:

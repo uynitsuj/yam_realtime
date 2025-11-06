@@ -12,6 +12,7 @@ import viser.extras
 import viser.transforms as vtf
 
 from yam_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik import solve_ik
+from yam_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik_vel_cost import solve_ik as solve_ik_vel_cost
 from yam_realtime.robots.viser.viser_base import ViserAbstractBase
 
 
@@ -24,8 +25,8 @@ class FrankaPyroki(ViserAbstractBase):
     target(s), solves IK with PyRoKi, and keeps track of the resulting joint targets.
     """
 
-    DEFAULT_ROBOT_DESCRIPTION = "franka_panda_description"
-    DEFAULT_TARGET_LINK = "panda_link8"
+    DEFAULT_ROBOT_DESCRIPTION = "panda_description"
+    DEFAULT_TARGET_LINK = "panda_hand"
 
     def __init__(
         self,
@@ -61,9 +62,9 @@ class FrankaPyroki(ViserAbstractBase):
         self._joint_count = joint_count
 
         # Override joint storage to match Franka's DOF configuration.
-        self.joints["left"] = np.zeros(joint_count)
+        self.joints["left"] = self.rest_pose
         if self.bimanual:
-            self.joints["right"] = np.zeros(joint_count)
+            self.joints["right"] = self.rest_pose
 
         # Register reset button callback now that the Viser widgets exist.
         @self.reset_button.on_click
@@ -104,7 +105,7 @@ class FrankaPyroki(ViserAbstractBase):
 
     def _initialize_transform_handles(self) -> None:
         default_position = (0.4, 0.0, 0.4)
-        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi / 2, 0.0).wxyz
+        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi, 0.0).wxyz
 
         left_handle = self.transform_handles.get("left")
         if left_handle and left_handle.control is not None:
@@ -143,6 +144,17 @@ class FrankaPyroki(ViserAbstractBase):
             idx = 0 if side == "left" else 1
 
             start = time.time()
+            # if self.joints[side] is not np.zeros(self.joint_count):
+            #     print("solve_ik_vel_cost")
+            # solution = solve_ik_vel_cost(
+            #     robot=self.robot,
+            #     target_link_name=self.target_link_names[idx],
+            #     target_position=target_tf.translation(),
+            #     target_wxyz=target_tf.rotation().wxyz,
+            #     prev_cfg=self.joints[side],
+            # )
+            # else:
+            #     print("solve_ik")
             solution = solve_ik(
                 robot=self.robot,
                 target_link_name=self.target_link_names[idx],

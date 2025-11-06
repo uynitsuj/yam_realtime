@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
@@ -298,7 +298,7 @@ name = "embreex"
 version = "2.17.7.post6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cd/95/e22d50ef1624bb2edd0c0aab5e6415c58e2ddba411e3ae0a025766739d83/embreex-2.17.7.post6-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:feb66dd5f79a6b6451cebe5192fea1858c7d97c537f02659f22b42d027352517", size = 10740295, upload-time = "2025-01-21T20:46:38.534Z" },
@@ -1207,6 +1207,35 @@ sdist = { url = "https://files.pythonhosted.org/packages/a1/d4/1fc4078c65507b51b
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl", hash = "sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484", size = 66469, upload-time = "2025-04-19T11:48:57.875Z" },
 ]
+
+[[package]]
+name = "panda-python"
+version = "0.7.5+libfranka.0.10.0"
+source = { path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_python-0.7.5+libfranka.0.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" }
+dependencies = [
+    { name = "numpy" },
+    { name = "requests" },
+    { name = "websockets" },
+]
+wheels = [
+    { filename = "panda_python-0.7.5+libfranka.0.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:501e94905a0adb1dd495909e7b3b317755ff0857a11c057a0614de67385d7165" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ansitable", marker = "extra == 'examples'" },
+    { name = "furo", marker = "extra == 'docs'" },
+    { name = "matplotlib", marker = "extra == 'examples'" },
+    { name = "numpy" },
+    { name = "qpsolvers", marker = "extra == 'examples'" },
+    { name = "requests" },
+    { name = "roboticstoolbox-python", marker = "extra == 'examples'" },
+    { name = "spatialmath-python", marker = "extra == 'examples'" },
+    { name = "sphinx", marker = "extra == 'docs'" },
+    { name = "sphinx-reredirects", marker = "extra == 'docs'" },
+    { name = "websockets", specifier = ">=11.0" },
+]
+provides-extras = ["examples", "docs"]
 
 [[package]]
 name = "pillow"
@@ -2408,6 +2437,7 @@ dependencies = [
     { name = "dotdict" },
     { name = "numpy" },
     { name = "omegaconf" },
+    { name = "panda-python" },
     { name = "portal" },
     { name = "pyroki" },
     { name = "robot-descriptions" },
@@ -2428,6 +2458,7 @@ requires-dist = [
     { name = "dotdict", specifier = "==0.1" },
     { name = "numpy", specifier = "==1.26.4" },
     { name = "omegaconf" },
+    { name = "panda-python", path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_python-0.7.5+libfranka.0.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" },
     { name = "portal" },
     { name = "pyroki", git = "https://github.com/chungmin99/pyroki.git" },
     { name = "robot-descriptions" },

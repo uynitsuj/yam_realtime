@@ -1,2 +1,2 @@
-_target_: xdof.robots.franka_osc.FrankaPanda
+_target_: yam_realtime.robots.franka_osc.FrankaPanda
 host_name: "172.16.0.1"

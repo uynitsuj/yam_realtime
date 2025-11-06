@@ -1,10 +1,10 @@
-_target_: xdof.envs.launch.LaunchConfig
+_target_: yam_realtime.envs.launch.LaunchConfig
 
 sensors:
   cameras:
 
 robots:
-  left: ["robot_configs/franka/franka_no_gripper.yaml"]
+  left: ["robot_configs/franka/franka_fake_gripper.yaml"]
 
 agent:
   _target_: yam_realtime.agents.teleoperation.franka_pyroki_viser_agent.FrankaPyrokiViserAgent

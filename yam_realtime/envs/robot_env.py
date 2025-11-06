@@ -114,12 +114,12 @@ class RobotEnv(dm_env.Environment):
     def action_spec(self):  # type: ignore
         spec = {}
         for name, robot in self._robot_dict.items():
-            if robot.get_robot_type() == RobotType.MOBILE_BASE:
-                spec[name] = robot.joint_state_spec()
-            else:
-                spec[name] = (
-                    robot.joint_state_spec() if self._use_joint_state_as_action else {"pos": robot.joint_pos_spec()}
-                )
+            # if robot.get_robot_type() == RobotType.MOBILE_BASE:
+            #     spec[name] = robot.joint_state_spec()
+            # else:
+            spec[name] = (
+                robot.joint_state_spec() if self._use_joint_state_as_action else {"pos": robot.joint_pos_spec()}
+            )
         return spec
 
     def close(self) -> None:
