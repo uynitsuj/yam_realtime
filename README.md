@@ -37,7 +37,7 @@ uv run robots_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.y
 ```
 For Franka Panda:
 ```bash
-uv run robots_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
+uv run robots_realtime/envs/launch.py --config_path configs/franka_viser_osc.yaml
 ```
 
 ## Extending with Custom Agents
