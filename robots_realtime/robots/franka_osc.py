@@ -186,9 +186,7 @@ class FrankaPanda(Robot):
 
                     # command torque
                     tau = tau_task + tau_null
-                    # print(f"tau: {tau}")
                     tau = np.clip(tau, -self.torque_limit, self.torque_limit)
-                    print(f"tau: {tau}")
                     self.ctrl.set_control(tau)
 
                     if self._joint_state_saver is not None:
