@@ -31,7 +31,6 @@ Kp_null = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
 damping_ratio = 8.0
 Kd_null = damping_ratio * 2.0 * np.sqrt(Kp_null)
 
-
 def orientation_error(current_rot: np.ndarray, desired_rot: np.ndarray) -> np.ndarray:
     """
     Compute orientation error in axis-angle form (3-vector).
