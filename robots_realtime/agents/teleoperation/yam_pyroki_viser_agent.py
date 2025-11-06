@@ -14,7 +14,7 @@ from robots_realtime.sensors.cameras.camera_utils import obs_get_rgb, resize_wit
 from robots_realtime.utils.portal_utils import remote
 
 
-class ViserPyrokiAgent(Agent):
+class YamPyrokiViserAgent(Agent):
     def __init__(self, bimanual: bool = False, right_arm_extrinsic: Optional[Dict[str, Any]] = None):
         self.right_arm_extrinsic = right_arm_extrinsic
         self.bimanual = bimanual

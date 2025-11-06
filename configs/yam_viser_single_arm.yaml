@@ -13,7 +13,7 @@ robots:
   left: ["robot_configs/yam/left.yaml"]
 
 agent:
-  _target_: robots_realtime.agents.teleoperation.viser_pyroki_agent.ViserPyrokiAgent
+  _target_: robots_realtime.agents.teleoperation.yam_pyroki_viser_agent.YamPyrokiViserAgent
   bimanual: false
 
 station_metadata:

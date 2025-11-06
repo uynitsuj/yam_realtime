@@ -1,11 +1,11 @@
-_target_: yam_realtime.envs.launch.LaunchConfig
+_target_: robots_realtime.envs.launch.LaunchConfig
 
 # sensors:
 #   cameras:
 #     top_camera:
-#         _target_: yam_realtime.sensors.cameras.camera.CameraNode
+#         _target_: robots_realtime.sensors.cameras.camera.CameraNode
 #         camera:
-#             _target_: yam_realtime.sensors.cameras.opencv_camera.OpencvCamera
+#             _target_: robots_realtime.sensors.cameras.opencv_camera.OpencvCamera
 #             device_path: "/dev/video4"
 #             camera_type: "realsense_camera"
 
@@ -14,7 +14,7 @@ robots:
   right: ["robot_configs/yam/left.yaml", "robot_configs/yam/right.yaml"]
 
 agent:
-  _target_: yam_realtime.agents.teleoperation.viser_pyroki_agent.ViserPyrokiAgent
+  _target_: robots_realtime.agents.teleoperation.yam_pyroki_viser_agent.YamPyrokiViserAgent
   bimanual: true
   right_arm_extrinsic:
       position: [0.0, -0.61, 0.0]
