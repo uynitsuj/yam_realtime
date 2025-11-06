@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 ###############################################################################
 # Single Kp, Kd for both position and orientation in OSC
 ###############################################################################
-KP_OSC = 5.0
-KD_OSC = 1.0
+KP_OSC = 130.0
+KD_OSC = 30.0
 
 # We'll build 6D arrays for the translational + rotational dimensions:
 KP_6D = np.full(6, KP_OSC)  # [100, 100, 100, 100, 100, 100]
@@ -27,7 +27,7 @@ KD_6D = np.full(6, KD_OSC)  # [ 20,  20,  20,  20,  20,  20]
 # Joint impedance for null space (example, can be changed)
 # Kp_null = np.array([75.0, 75.0, 50.0, 50.0, 40.0, 25.0, 25.0])
 # Kp_null = np.array([30.0, 30.0, 25.0, 25.0, 20.0, 10.0, 10.0])
-Kp_null = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+Kp_null = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
 damping_ratio = 8.0
 Kd_null = damping_ratio * 2.0 * np.sqrt(Kp_null)
 
@@ -95,6 +95,7 @@ class FrankaPanda(Robot):
         self._num_dofs = 7
 
         # reduce collision sensitivity for enabling contact rich behavoir
+        self.torque_limit = 9.0
         self.interface.get_robot().set_collision_behavior([100.0] * 7, [100.0] * 7, [100.0] * 6, [100.0] * 6)
         self.model = self.interface.get_model()
         self.frame = panda_py.libfranka.Frame.kFlange
@@ -187,7 +188,7 @@ class FrankaPanda(Robot):
                     # command torque
                     tau = tau_task + tau_null
                     # print(f"tau: {tau}")
-                    # tau = np.clip(tau, -1, 1)
+                    tau = np.clip(tau, -self.torque_limit, self.torque_limit)
                     print(f"tau: {tau}")
                     self.ctrl.set_control(tau)
 

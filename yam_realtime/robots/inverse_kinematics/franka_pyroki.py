@@ -47,6 +47,7 @@ class FrankaPyroki(ViserAbstractBase):
         self.coordinate_frame = coordinate_frame
         self.has_jitted_left = False
         self.has_jitted_right = False
+        self.first_solve = True
 
         description = robot_description or self.DEFAULT_ROBOT_DESCRIPTION
 
@@ -92,10 +93,8 @@ class FrankaPyroki(ViserAbstractBase):
     def _setup_solver_specific(self) -> None:
         self.robot = pk.Robot.from_urdf(self.urdf)
         cfg = np.array(self.urdf.cfg, dtype=float)
-        if cfg.shape[0] >= self.robot.joints.num_actuated_joints:
-            self.rest_pose = cfg[: self.robot.joints.num_actuated_joints]
-        else:
-            self.rest_pose = np.zeros(self.robot.joints.num_actuated_joints)
+        # Hardcoded to be close to first solve of IK
+        self.rest_pose = np.array([ 4.5195120e-04, -4.1407236e-01, -4.3886289e-04, -2.5841961, -2.1377161e-04,  2.1701238e+00,  7.8556901e-01,  2.0000000e-02])
 
     def _setup_gui(self) -> None:
         super()._setup_gui()
@@ -105,7 +104,7 @@ class FrankaPyroki(ViserAbstractBase):
 
     def _initialize_transform_handles(self) -> None:
         default_position = (0.4, 0.0, 0.4)
-        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi, 0.0).wxyz
+        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi, np.pi).wxyz
 
         left_handle = self.transform_handles.get("left")
         if left_handle and left_handle.control is not None:
@@ -144,17 +143,6 @@ class FrankaPyroki(ViserAbstractBase):
             idx = 0 if side == "left" else 1
 
             start = time.time()
-            # if self.joints[side] is not np.zeros(self.joint_count):
-            #     print("solve_ik_vel_cost")
-            # solution = solve_ik_vel_cost(
-            #     robot=self.robot,
-            #     target_link_name=self.target_link_names[idx],
-            #     target_position=target_tf.translation(),
-            #     target_wxyz=target_tf.rotation().wxyz,
-            #     prev_cfg=self.joints[side],
-            # )
-            # else:
-            #     print("solve_ik")
             solution = solve_ik(
                 robot=self.robot,
                 target_link_name=self.target_link_names[idx],
