@@ -3,9 +3,9 @@ requires = ["flit_core >= 3.4"]
 build-backend = "flit_core.buildapi"
 
 [project]
-name = "yam_realtime"
+name = "robots_realtime"
 version = "0.1.0"
-description = "A collection of realtime & high-frequency control interfaces for I2RT YAM bi-manual robot arms"
+description = "A collection of realtime & high-frequency control interfaces for robot arms"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -28,14 +28,14 @@ panda_python = { path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_pyth
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["yam_realtime*"]
+include = ["robots_realtime*"]
 exclude = ["configs*"]
 
 [project.urls]
-Repository = "https://github.com/uynitsuj/yam_realtime"
+Repository = "https://github.com/uynitsuj/robots_realtime"
 
 [tool.flit.module]
-name = "yam_realtime"
+name = "robots_realtime"
 
 [tool.ruff]
 line-length = 119 # Set the max line length to 119 characters.
@@ -84,7 +84,7 @@ skip-magic-trailing-comma = false
 
 [tool.pyright]
 pythonVersion = "3.12"
-ignore = ["dependencies/**", "yam_realtime/scripts/**"]
+ignore = ["dependencies/**", "robots_realtime/scripts/**"]
 
 reportMissingImports = "none"
 reportAttributeAccessIssue = "none"

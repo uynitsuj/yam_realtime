@@ -1,4 +1,4 @@
-_target_: yam_realtime.envs.launch.LaunchConfig
+_target_: robots_realtime.envs.launch.LaunchConfig
 
 # sensors:
 #   cameras:
@@ -13,7 +13,7 @@ robots:
   left: ["robot_configs/yam/left.yaml"]
 
 agent:
-  _target_: yam_realtime.agents.teleoperation.viser_pyroki_agent.ViserPyrokiAgent
+  _target_: robots_realtime.agents.teleoperation.viser_pyroki_agent.ViserPyrokiAgent
   bimanual: false
 
 station_metadata:

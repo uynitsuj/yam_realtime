@@ -1,17 +1,18 @@
-# YAM Realtime Control Interfaces
+# Robot Realtime Control Interfaces
 
-YAM Realtime is a modular software stack for realtime control, teleoperation, and policy integration on bi-manual I2RT YAM arms.
+Robots Realtime is a modular software stack for realtime control, teleoperation, and policy integration on various robot embodiments including bi-manual I2RT YAM arms, Franka Panda, (more to come...).
 
 It provides extensible pythonic infrastructure for low-latency joint command streaming, agent-based policy control, visualization, and integration with inverse kinematics solvers like [pyroki](https://github.com/chungmin99/pyroki) developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
 
 ![yam_realtime](media/yam_realtime.gif)
+![franka_realtime](media/franka_realtime.gif)
 
 Shown is a headless-capable web-based real-time visualizer and controller for viewing commanded joint state and actual robot state, built with [Viser](https://viser.studio/main/)
 
 ## Installation
 Clone the repository and initialize submodules:
 ```bash
-git clone --recurse-submodules https://github.com/uynitsuj/yam_realtime.git
+git clone --recurse-submodules https://github.com/uynitsuj/robots_realtime.git
 # Or if already cloned without --recurse-submodules, run:
 git submodule update --init --recursive
 ```
@@ -26,19 +27,25 @@ uv pip install -e .
 uv pip install dependencies/i2rt/
 ```
 ## Configuration
-First configure YAM arms CAN chain according to instructions from the [I2RT repo](https://github.com/i2rt-robotics/i2rt)
+If using YAM arms, configure YAM arms CAN chain according to instructions from the [I2RT repo](https://github.com/i2rt-robotics/i2rt)
 
 ## Launch
-Then run the launch entrypoint script with an appropriate robot config file:
+Then run the launch entrypoint script with an appropriate robot config file.
+For Bimanual YAMS:
 ```bash
-python yam_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
+uv run robots_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
 ```
+For Franka Panda:
+```bash
+uv run robots_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
+```
+
 ## Extending with Custom Agents
 To integrate your own controller or policy:
 
 Subclass the base agent interface:
 ```python
-from yam_realtime.agents.agent import Agent
+from robots_realtime.agents.agent import Agent
 
 class MyAgent(Agent):
     ...
