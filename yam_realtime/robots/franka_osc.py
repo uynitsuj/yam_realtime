@@ -3,11 +3,11 @@
 import logging
 import time
 from threading import Event, Lock, Thread
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import numpy as np
-from i2rt.utils.utils import RateRecorder
 from i2rt.robots.robot import Robot
+from i2rt.utils.utils import RateRecorder
 from scipy.spatial.transform import Rotation as R
 
 from yam_realtime.robots.utils import Rate

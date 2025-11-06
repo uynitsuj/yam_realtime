@@ -12,7 +12,6 @@ import viser.extras
 import viser.transforms as vtf
 
 from yam_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik import solve_ik
-from yam_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik_vel_cost import solve_ik as solve_ik_vel_cost
 from yam_realtime.robots.viser.viser_base import ViserAbstractBase
 
 

@@ -2,7 +2,6 @@ import time
 from typing import Any, Dict, Optional, Union
 
 import dm_env
-from i2rt.robots.robot import RobotType
 
 from yam_realtime.robots.robot import Robot
 from yam_realtime.robots.utils import Rate

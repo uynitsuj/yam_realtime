@@ -1,19 +1,17 @@
 import threading
 import time
-from dataclasses import dataclass
 from typing import Any, Dict
 
 import numpy as np
-import tyro
 from dm_env.specs import Array
 from openpi_client import action_chunk_broker, image_tools
 from openpi_client import websocket_client_policy as _websocket_client_policy
 from openpi_client.runtime.agents import policy_agent as _policy_agent
+from yam_realtime.data.data_utils import recusive_flatten
+from yam_realtime.learning.diffusion_policy.policy_network import ModelConfig
 
 from yam_realtime.agents.agent import PolicyAgent
 from yam_realtime.agents.constants import ActionSpec
-from yam_realtime.data.data_utils import recusive_flatten
-from yam_realtime.learning.diffusion_policy.policy_network import ModelConfig
 from yam_realtime.robots.utils import Rate
 from yam_realtime.utils.portal_utils import remote
 

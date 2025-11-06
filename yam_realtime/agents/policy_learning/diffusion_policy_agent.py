@@ -5,10 +5,10 @@ from typing import Optional, Union
 
 import numpy as np
 from dm_env.specs import Array
+from yam_realtime.data.data_utils import recusive_flatten, reverse_flatten
 
 from yam_realtime.agents.agent import PolicyAgent
 from yam_realtime.agents.constants import ActionSpec
-from yam_realtime.data.data_utils import recusive_flatten, reverse_flatten
 from yam_realtime.utils.portal_utils import remote
 
 
