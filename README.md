@@ -6,6 +6,7 @@ It provides extensible pythonic infrastructure for low-latency joint command str
 
 ![yam_realtime](media/yam_realtime.gif)
 ![franka_realtime](media/franka_realtime.gif)
+![franka_realtime2](media/franka_realtime2.gif)
 
 Shown is a headless-capable web-based real-time visualizer and controller for viewing commanded joint state and actual robot state, built with [Viser](https://viser.studio/main/)
 
