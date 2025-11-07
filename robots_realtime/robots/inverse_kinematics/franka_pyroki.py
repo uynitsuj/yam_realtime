@@ -163,7 +163,7 @@ class FrankaPyroki(ViserAbstractBase):
             )
             elapsed_ms = (time.time() - start) * 1000.0
 
-            solution[-1] = 0.06 # For mitigating visualization gripper jitter from diff IK solver
+            solution[-1] = 0.06  # For mitigating visualization gripper jitter from diff IK solver
             self.joints[side] = solution
 
             if side == "left":

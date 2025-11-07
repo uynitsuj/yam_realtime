@@ -63,9 +63,7 @@ class ZedCamera(CameraDriver):
     resolution: str = "SVGA"
     fps: int = 60
     device_id: str | None = None
-    image_transfer_time_offset_ms: float = (
-        70  # unit: ms, 
-    )
+    image_transfer_time_offset_ms: float = 70  # unit: ms,
     concat_image: bool = False  # if True, concat the left and right image, it might slow down the read frequency.
     name: str | None = None
     enable_depth: bool = False
@@ -123,7 +121,7 @@ class ZedCamera(CameraDriver):
         self.camera_info = self.zed.get_camera_information()
         self.runtime_parameters = sl.RuntimeParameters()
         self.camera_type = self.camera_info.camera_model.name
-        
+
         self.intrinsic_data = {
             "left": self._load_intrinsic_data("left"),
             "right": self._load_intrinsic_data("right"),
@@ -227,7 +225,7 @@ class ZedCamera(CameraDriver):
             "image_transfer_time_offset_ms": self.image_transfer_time_offset_ms,
             "intrinsics": self.intrinsic_data,
             "concat_image": self.concat_image,
-            }
+        }
         return info
 
     def stop(self) -> None:

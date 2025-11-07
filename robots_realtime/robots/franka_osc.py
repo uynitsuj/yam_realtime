@@ -6,13 +6,13 @@ from threading import Event, Lock, Thread
 from typing import Any, Dict, Optional
 
 import numpy as np
+import panda_py
 from i2rt.robots.robot import Robot
 from i2rt.utils.utils import RateRecorder
+from panda_py import controllers
 from scipy.spatial.transform import Rotation as R
 
 from robots_realtime.robots.utils import Rate
-import panda_py
-from panda_py import controllers
 
 logger = logging.getLogger(__name__)
 
@@ -122,14 +122,12 @@ class FrankaPanda(Robot):
                 daemon=True,
             )
             self._gripper_thread.start()
-        
 
         # reduce collision sensitivity for enabling contact rich behavoir
         self.torque_limit = 9.0
         self.interface.get_robot().set_collision_behavior([100.0] * 7, [100.0] * 7, [100.0] * 6, [100.0] * 6)
         self.model = self.interface.get_model()
         self.frame = panda_py.libfranka.Frame.kFlange
-
 
         self.ctrl = controllers.AppliedTorque()
         print("starting controller")
@@ -230,7 +228,9 @@ class FrankaPanda(Robot):
                     tau = tau_task + tau_null
                     tau = np.clip(tau, -self.torque_limit, self.torque_limit)
                     if time.time() - self.ctrl_thread_start_time < 6.00 and np.linalg.norm(err_6d) > 0.01:
-                        tau = np.clip(tau, -3.0, 3.0) # If far away from home pose at init, clip torque to avoid high velocity homing
+                        tau = np.clip(
+                            tau, -3.0, 3.0
+                        )  # If far away from home pose at init, clip torque to avoid high velocity homing
                     self.ctrl.set_control(tau)
 
                     if self._joint_state_saver is not None:
