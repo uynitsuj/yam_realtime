@@ -2,6 +2,13 @@ _target_: robots_realtime.envs.launch.LaunchConfig
 
 sensors:
   cameras:
+    top_camera:
+          _target_: robots_realtime.sensors.cameras.camera.CameraNode
+          camera:
+            _target_: robots_realtime.sensors.cameras.zed_camera.ZedCamera
+            resolution: "HD720"
+            fps: 30
+            device_id: "24400334"
 
 robots:
   left: ["robot_configs/franka/franka_default_panda_gripper.yaml"]

@@ -122,6 +122,7 @@ class FrankaPanda(Robot):
                 daemon=True,
             )
             self._gripper_thread.start()
+        
 
         # reduce collision sensitivity for enabling contact rich behavoir
         self.torque_limit = 9.0

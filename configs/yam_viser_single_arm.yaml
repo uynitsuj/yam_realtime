@@ -3,9 +3,9 @@ _target_: robots_realtime.envs.launch.LaunchConfig
 # sensors:
 #   cameras:
 #     top_camera:
-#         _target_: yam_realtime.sensors.cameras.camera.CameraNode
+#         _target_: robots_realtime.sensors.cameras.camera.CameraNode
 #         camera:
-#             _target_: yam_realtime.sensors.cameras.opencv_camera.OpencvCamera
+#             _target_: robots_realtime.sensors.cameras.opencv_camera.OpencvCamera
 #             device_path: "/dev/video4"
 #             camera_type: "realsense_camera"
 

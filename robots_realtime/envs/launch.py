@@ -56,7 +56,7 @@ def main(args: Args) -> None:
     """
     # Setup logging and get logger
     logger = setup_logging()
-    logger.info("Starting YAM realtime control system...")
+    logger.info("Starting realtime control system...")
 
     server_processes = []
 
