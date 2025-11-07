@@ -121,7 +121,7 @@ class FrankaPyroki(ViserAbstractBase):
             left_handle.control.position = default_position  # type: ignore[assignment]
             left_handle.control.wxyz = default_orientation  # type: ignore[assignment]
         if left_handle:
-            left_handle.tcp_offset_frame.position = (0.0, 0.0, 0.0)  # type: ignore[assignment]
+            left_handle.tcp_offset_frame.position = (0.0, 0.0, -0.107)  # type: ignore[assignment]
             left_handle.tcp_offset_frame.wxyz = (1.0, 0.0, 0.0, 0.0)  # type: ignore[assignment]
 
         if self.bimanual:
@@ -130,7 +130,7 @@ class FrankaPyroki(ViserAbstractBase):
                 if right_handle.control is not None:
                     right_handle.control.position = default_position  # type: ignore[assignment]
                     right_handle.control.wxyz = default_orientation  # type: ignore[assignment]
-                right_handle.tcp_offset_frame.position = (0.0, 0.0, 0.0)  # type: ignore[assignment]
+                right_handle.tcp_offset_frame.position = (0.0, 0.0, -0.107)  # type: ignore[assignment]
                 right_handle.tcp_offset_frame.wxyz = (1.0, 0.0, 0.0, 0.0)  # type: ignore[assignment]
 
     def _update_optional_handle_sizes(self) -> None:

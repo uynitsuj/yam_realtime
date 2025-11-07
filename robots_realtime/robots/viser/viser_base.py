@@ -165,7 +165,7 @@ class ViserAbstractBase(ABC):
             self.transform_handles["right"].control.wxyz = right_wxyz_xyz[:4]  # type: ignore
             self.transform_handles["right"].control.position = right_wxyz_xyz[4:]  # type: ignore
 
-    def set_tcp_offsets(self, left_offset: np.ndarray, right_offset: np.ndarray):
+    def set_tcp_offsets(self, left_offset: np.ndarray, right_offset: Optional[np.ndarray] = None):
         """
         Set TCP offset frames.
         left_offset: [wxyz, xyz]
@@ -175,6 +175,7 @@ class ViserAbstractBase(ABC):
             self.transform_handles["left"].tcp_offset_frame.wxyz = left_offset[:4]
             self.transform_handles["left"].tcp_offset_frame.position = left_offset[4:]
         if self.bimanual and "right" in self.transform_handles:
+            assert right_offset is not None
             self.transform_handles["right"].tcp_offset_frame.wxyz = right_offset[:4]
             self.transform_handles["right"].tcp_offset_frame.position = right_offset[4:]
 
