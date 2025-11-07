@@ -11,6 +11,8 @@ from i2rt.utils.utils import RateRecorder
 from scipy.spatial.transform import Rotation as R
 
 from robots_realtime.robots.utils import Rate
+import panda_py
+from panda_py import controllers
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +91,6 @@ class FrankaPanda(Robot):
         enable_gripper: bool = False,
     ) -> None:
         """Internal method to handle the actual initialization."""
-        import panda_py
-        from panda_py import controllers
 
         self._joint_state_saver = None
         self.name = name or "franka"
@@ -130,8 +130,13 @@ class FrankaPanda(Robot):
         self.model = self.interface.get_model()
         self.frame = panda_py.libfranka.Frame.kFlange
 
+
         self.ctrl = controllers.AppliedTorque()
+        print("starting controller")
+
         self.interface.start_controller(self.ctrl)
+
+        print("controller started")
 
         self._cmd_lock = Lock()
         self._joint_cmd = self.get_joint_pos()

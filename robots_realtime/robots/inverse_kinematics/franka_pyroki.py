@@ -153,12 +153,7 @@ class FrankaPyroki(ViserAbstractBase):
             idx = 0 if side == "left" else 1
 
             start = time.time()
-            # solution = solve_ik(
-            #     robot=self.robot,
-            #     target_link_name=self.target_link_names[idx],
-            #     target_position=target_tf.translation(),
-            #     target_wxyz=target_tf.rotation().wxyz,
-            # )
+
             solution = solve_ik_vel_cost(
                 robot=self.robot,
                 target_link_name=self.target_link_names[idx],

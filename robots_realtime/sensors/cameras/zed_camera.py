@@ -191,8 +191,8 @@ class ZedCamera(CameraDriver):
                     timestamp=ts_image - self.image_transfer_time_offset_ms,
                 )
             else:
-                left_rgb = left_bgra[:, :, :3][:, :, ::-1]
-                right_rgb = right_bgra[:, :, :3][:, :, ::-1]
+                left_rgb = np.ascontiguousarray(left_bgra[:, :, :3][:, :, ::-1])
+                right_rgb = np.ascontiguousarray(right_bgra[:, :, :3][:, :, ::-1])
                 result = CameraData(
                     images={"left_rgb": left_rgb, "right_rgb": right_rgb},
                     timestamp=ts_image - self.image_transfer_time_offset_ms,

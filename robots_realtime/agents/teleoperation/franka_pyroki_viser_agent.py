@@ -14,7 +14,7 @@ from dm_env.specs import Array
 
 from robots_realtime.agents.agent import Agent
 from robots_realtime.robots.inverse_kinematics.franka_pyroki import FrankaPyroki
-from robots_realtime.sensors.cameras.camera_utils import obs_get_rgb, resize_with_pad
+from robots_realtime.sensors.cameras.camera_utils import obs_get_rgb, resize_with_pad, resize_with_center_crop
 from robots_realtime.utils.portal_utils import remote
 
 
@@ -144,7 +144,7 @@ class FrankaPyrokiViserAgent(Agent):
                 for key, image in rgb_images.items():
                     if key not in self.viser_cam_img_handles:
                         self.viser_cam_img_handles[key] = self.viser_server.gui.add_image(image, label=key)
-                    self.viser_cam_img_handles[key].image = resize_with_pad(image, 224, 224)
+                    self.viser_cam_img_handles[key].image = resize_with_center_crop(image, 224, 224)
 
             time.sleep(self._update_period)
 
