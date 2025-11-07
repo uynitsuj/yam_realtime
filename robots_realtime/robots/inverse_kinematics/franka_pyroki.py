@@ -12,6 +12,7 @@ import viser.extras
 import viser.transforms as vtf
 
 from robots_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik import solve_ik
+from robots_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik_vel_cost import solve_ik as solve_ik_vel_cost
 from robots_realtime.robots.viser.viser_base import ViserAbstractBase
 
 
@@ -142,11 +143,18 @@ class FrankaPyroki(ViserAbstractBase):
             idx = 0 if side == "left" else 1
 
             start = time.time()
-            solution = solve_ik(
+            # solution = solve_ik(
+            #     robot=self.robot,
+            #     target_link_name=self.target_link_names[idx],
+            #     target_position=target_tf.translation(),
+            #     target_wxyz=target_tf.rotation().wxyz,
+            # )
+            solution = solve_ik_vel_cost(
                 robot=self.robot,
                 target_link_name=self.target_link_names[idx],
                 target_position=target_tf.translation(),
                 target_wxyz=target_tf.rotation().wxyz,
+                prev_cfg=self.joints[side],
             )
             elapsed_ms = (time.time() - start) * 1000.0
 

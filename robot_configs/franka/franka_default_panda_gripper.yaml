@@ -1,0 +1,5 @@
+_target_: robots_realtime.robots.robot.ConcatenatedRobot
+robots:
+  - _target_: robots_realtime.robots.franka_osc.FrankaPanda
+    host_name: "172.16.0.1"
+    enable_gripper: true

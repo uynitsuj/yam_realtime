@@ -48,6 +48,7 @@ class FrankaPanda(Robot):
         username: Optional[str] = None,
         password: Optional[str] = None,
         name: Optional[str] = None,
+        enable_gripper: bool = False,
     ) -> None:
         """Initialize the Franka Panda robot arm without gripper.
 
@@ -58,6 +59,8 @@ class FrankaPanda(Robot):
                 The username for robot controller login
             password: str
                 The password for robot controller login
+            enable_gripper: bool
+                Whether to enable control for a default Franka Panda gripper
         """
         # Store initialization parameters for reinit
         self._init_params = {
@@ -66,7 +69,7 @@ class FrankaPanda(Robot):
             "password": password,
             "name": name,
         }
-        self._initialize(host_name, username, password, name)
+        self._initialize(host_name, username, password, name, enable_gripper)
 
     def _initialize(
         self,
@@ -74,6 +77,7 @@ class FrankaPanda(Robot):
         username: Optional[str] = None,
         password: Optional[str] = None,
         name: Optional[str] = None,
+        enable_gripper: bool = False,
     ) -> None:
         """Internal method to handle the actual initialization."""
         import panda_py
@@ -92,6 +96,24 @@ class FrankaPanda(Robot):
         self.state = self.interface.get_state()
         self.fk = panda_py.fk
         self._num_dofs = 7
+        self._stop_event = Event()
+
+        if enable_gripper:
+            self.gripper = panda_py.libfranka.Gripper(host_name)
+            self.gripper.grasp(0.0, 10.0, 1.0)
+            self.gripper.grasp(0.08, 10.0, 1.0) # Max width is 0.08m
+            self._num_dofs += 1
+            self._gripper_lock = Lock()
+            self._gripper_update_event = Event()
+            self._gripper_target_width = self.gripper.read_once().width
+            self._last_gripper_command = self._gripper_target_width
+            self._last_gripper_state = self._last_gripper_command
+            self._gripper_thread = Thread(
+                target=self._gripper_command_loop,
+                name="gripper_command_loop",
+                daemon=True,
+            )
+            self._gripper_thread.start()
 
         # reduce collision sensitivity for enabling contact rich behavoir
         self.torque_limit = 9.0
@@ -105,7 +127,6 @@ class FrankaPanda(Robot):
         self._cmd_lock = Lock()
         self._joint_cmd = self.get_joint_pos()
         self._server_thread = Thread(target=self.run, name="control_loop")
-        self._stop_event = Event()  # Add a stop event
         self._server_thread.start()
         self._update_rate = RateRecorder(name="update_rate")
         self._update_rate.start()
@@ -131,7 +152,10 @@ class FrankaPanda(Robot):
                     rec.track()
                     # extract joint command and current state
                     with self._cmd_lock:
-                        joint_cmd = self._joint_cmd.copy()
+                        if hasattr(self, "gripper"):
+                            joint_cmd = self._joint_cmd[:-1].copy()
+                        else:
+                            joint_cmd = self._joint_cmd.copy()
 
                     state = self.interface.get_state()
                     self.state = state
@@ -182,7 +206,10 @@ class FrankaPanda(Robot):
                     # null-space
                     dq_null = -Kp_null * (q - joint_cmd) - Kd_null * dq
                     Jbar = Mq_inv @ J.T @ Mx
-                    tau_null = (np.eye(self._num_dofs) - J.T @ Jbar.T) @ dq_null
+                    if hasattr(self, "gripper"):
+                        tau_null = (np.eye(self._num_dofs-1) - J.T @ Jbar.T) @ dq_null
+                    else:
+                        tau_null = (np.eye(self._num_dofs) - J.T @ Jbar.T) @ dq_null
 
                     # command torque
                     tau = tau_task + tau_null
@@ -207,23 +234,27 @@ class FrankaPanda(Robot):
         return self._num_dofs
 
     def get_joint_pos(self) -> np.ndarray:
+        if hasattr(self, "gripper"):
+            return np.concatenate([self.interface.q, [self._last_gripper_state]])
         return self.interface.q
 
     def command_joint_pos(self, joint_pos: np.ndarray) -> None:
         assert len(joint_pos) == self._num_dofs, (
             f"Joint position array length mismatch. num_dofs: {self._num_dofs}, joint_pos: {len(joint_pos)}."
         )
-        assert len(joint_pos) == 7, "Joint command must have 7 elements."
         self._update_rate.track()
         with self._cmd_lock:
             self._joint_cmd = joint_pos
+            if hasattr(self, "gripper"):
+                self._submit_gripper_width(joint_pos[-1])
 
     def get_observations(self) -> Dict[str, np.ndarray]:
-        return {
-            "joint_pos": self.state.q,
+        obs = {
+            "joint_pos": self.state.q if not hasattr(self, "gripper") else np.concatenate([self.state.q, [self._last_gripper_state]]),
             "joint_vel": self.state.dq,
             "joint_eff": self.state.tau_J,
         }
+        return obs
 
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
@@ -238,6 +269,10 @@ class FrankaPanda(Robot):
         self._stop_event.set()
         if self._server_thread.is_alive():
             self._server_thread.join()
+        if hasattr(self, "_gripper_update_event"):
+            self._gripper_update_event.set()
+        if hasattr(self, "_gripper_thread") and self._gripper_thread.is_alive():
+            self._gripper_thread.join()
         # Stop the controller
         self.interface.stop_controller()
         # Logout from desk
@@ -256,4 +291,34 @@ class FrankaPanda(Robot):
         # Reinitialize with stored parameters
         self._initialize(**self._init_params)
         logger.info(f"Robot {self.name} reinitialized")
+
+    def _gripper_command_loop(self) -> None:
+        while not self._stop_event.is_set():
+            triggered = self._gripper_update_event.wait(timeout=0.05)
+            if self._stop_event.is_set():
+                break
+            if not triggered:
+                continue
+            with self._gripper_lock:
+                width = self._gripper_target_width
+                self._gripper_update_event.clear()
+            if width is None:
+                continue
+            if self._last_gripper_command is not None and abs(self._last_gripper_command - width) < 1e-4:
+                continue
+            try:
+                if width > 0.055:
+                    self.gripper.move(width, 10.0)
+                else:
+                    self.gripper.grasp(width, 10.0, 2.0)
+                
+                self._last_gripper_command = width
+                self._last_gripper_state = self.gripper.read_once().width
+            except Exception:
+                logger.exception("Failed to command gripper to width %s", width)
+
+    def _submit_gripper_width(self, width: float) -> None:
+        with self._gripper_lock:
+            self._gripper_target_width = width
+            self._gripper_update_event.set()
 

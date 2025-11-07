@@ -112,6 +112,10 @@ class FrankaPyrokiViserAgent(Agent):
 
         self.viser_cam_img_handles: Dict[str, viser.GuiImageHandle] = {}
 
+        self.left_gripper_slider_handle = self.viser_server.gui.add_slider(label="Gripper Width", min=0.0, max=0.08, step=0.001, initial_value=0.08)
+        if self.bimanual:
+            self.right_gripper_slider_handle = self.viser_server.gui.add_slider(label="Gripper Width (R)", min=0.0, max=0.08, step=0.001, initial_value=0.08)
+
     def _update_visualization(self) -> None:
         """Continuously sync live robot state and camera frames into Viser."""
 
@@ -149,11 +153,13 @@ class FrankaPyrokiViserAgent(Agent):
         self.obs = deepcopy(obs)
 
         left_target = np.asarray(self.ik.joints["left"], dtype=np.float32)
+        left_target[-1] = self.left_gripper_slider_handle.value
         action: Dict[str, Dict[str, np.ndarray]] = {"left": {"pos": left_target}}
 
         if self.bimanual:
             assert "right" in self.ik.joints, "bimanual mode requires both IK solutions"
             right_target = np.asarray(self.ik.joints["right"], dtype=np.float32)
+            right_target[-1] = self.right_gripper_slider_handle.value
             action["right"] = {"pos": right_target}
 
         return action

@@ -87,8 +87,8 @@ def _solve_ik_jax(
             robot,
             joint_var,
             prev_cfg,
-            0.2,  # dt
-            60.0,
+            0.01,  # dt
+            3.0,
         ),
     ]
     sol = (

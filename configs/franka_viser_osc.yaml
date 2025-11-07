@@ -4,7 +4,7 @@ sensors:
   cameras:
 
 robots:
-  left: ["robot_configs/franka/franka_fake_gripper.yaml"]
+  left: ["robot_configs/franka/franka_default_panda_gripper.yaml"]
 
 agent:
   _target_: robots_realtime.agents.teleoperation.franka_pyroki_viser_agent.FrankaPyrokiViserAgent
