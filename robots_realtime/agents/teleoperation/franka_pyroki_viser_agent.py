@@ -147,7 +147,6 @@ class FrankaPyrokiViserAgent(Agent):
                     self.viser_cam_img_handles[key].image = resize_with_center_crop(image, 224, 224)
 
             time.sleep(self._update_period)
-
     # ------------------------------------------------------------------
     # Agent interface
     # ------------------------------------------------------------------
