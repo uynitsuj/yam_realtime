@@ -31,6 +31,14 @@ Kp_null = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
 damping_ratio = 8.0
 Kd_null = damping_ratio * 2.0 * np.sqrt(Kp_null)
 
+GRIPPER_DEFAULT_SPEED = 10.0
+GRIPPER_INITIAL_FORCE = 1.0
+GRIPPER_ACTIVE_FORCE = 4.0
+GRIPPER_MAX_WIDTH = 0.08
+GRIPPER_MOVE_THRESHOLD = 0.055
+GRIPPER_COMMAND_EPSILON = 1e-3
+GRIPPER_UPDATE_TIMEOUT_S = 0.05
+
 
 def orientation_error(current_rot: np.ndarray, desired_rot: np.ndarray) -> np.ndarray:
     """
@@ -100,8 +108,8 @@ class FrankaPanda(Robot):
 
         if enable_gripper:
             self.gripper = panda_py.libfranka.Gripper(host_name)
-            self.gripper.grasp(0.0, 10.0, 1.0)
-            self.gripper.grasp(0.08, 10.0, 1.0)  # Max width is 0.08m
+            self.gripper.grasp(0.0, GRIPPER_DEFAULT_SPEED, GRIPPER_INITIAL_FORCE)
+            self.gripper.grasp(GRIPPER_MAX_WIDTH, GRIPPER_DEFAULT_SPEED, GRIPPER_INITIAL_FORCE)
             self._num_dofs += 1
             self._gripper_lock = Lock()
             self._gripper_update_event = Event()
@@ -126,6 +134,7 @@ class FrankaPanda(Robot):
 
         self._cmd_lock = Lock()
         self._joint_cmd = self.get_joint_pos()
+        self.ctrl_thread_start_time = time.time()
         self._server_thread = Thread(target=self.run, name="control_loop")
         self._server_thread.start()
         self._update_rate = RateRecorder(name="update_rate")
@@ -214,6 +223,8 @@ class FrankaPanda(Robot):
                     # command torque
                     tau = tau_task + tau_null
                     tau = np.clip(tau, -self.torque_limit, self.torque_limit)
+                    if time.time() - self.ctrl_thread_start_time < 6.00 and np.linalg.norm(err_6d) > 0.01:
+                        tau = np.clip(tau, -3.0, 3.0) # If far away from home pose at init, clip torque to avoid high velocity homing
                     self.ctrl.set_control(tau)
 
                     if self._joint_state_saver is not None:
@@ -295,7 +306,7 @@ class FrankaPanda(Robot):
 
     def _gripper_command_loop(self) -> None:
         while not self._stop_event.is_set():
-            triggered = self._gripper_update_event.wait(timeout=0.05)
+            triggered = self._gripper_update_event.wait(timeout=GRIPPER_UPDATE_TIMEOUT_S)
             if self._stop_event.is_set():
                 break
             if not triggered:
@@ -305,13 +316,16 @@ class FrankaPanda(Robot):
                 self._gripper_update_event.clear()
             if width is None:
                 continue
-            if self._last_gripper_command is not None and abs(self._last_gripper_command - width) < 1e-4:
+            if (
+                self._last_gripper_command is not None
+                and abs(self._last_gripper_command - width) < GRIPPER_COMMAND_EPSILON
+            ):
                 continue
             try:
-                if width > 0.055:
-                    self.gripper.move(width, 10.0)
+                if width > GRIPPER_MOVE_THRESHOLD:
+                    self.gripper.move(width, GRIPPER_DEFAULT_SPEED)
                 else:
-                    self.gripper.grasp(width, 10.0, 2.0)
+                    self.gripper.grasp(width, GRIPPER_DEFAULT_SPEED, GRIPPER_ACTIVE_FORCE)
 
                 self._last_gripper_command = width
                 self._last_gripper_state = self.gripper.read_once().width
