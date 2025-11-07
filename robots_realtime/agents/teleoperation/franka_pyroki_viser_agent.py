@@ -56,7 +56,7 @@ class FrankaPyrokiViserAgent(Agent):
         self.ik_thread.start()
 
         self.obs: Optional[Dict[str, Any]] = None
-        self._update_period = 0.02
+        self._update_period = 0.05
         self._setup_visualization()
 
         self.real_vis_thread = threading.Thread(target=self._update_visualization, name="franka_real_vis")
@@ -112,11 +112,11 @@ class FrankaPyrokiViserAgent(Agent):
         self.viser_cam_img_handles: Dict[str, viser.GuiImageHandle] = {}
 
         self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
-            label="Gripper Width", min=0.0, max=0.08, step=0.001, initial_value=0.08
+            label="Gripper Width", min=0.0, max=0.1, step=0.001, initial_value=0.1
         )
         if self.bimanual:
             self.right_gripper_slider_handle = self.viser_server.gui.add_slider(
-                label="Gripper Width (R)", min=0.0, max=0.08, step=0.001, initial_value=0.08
+                label="Gripper Width (R)", min=0.0, max=0.1, step=0.001, initial_value=0.1
             )
         
         self.camera_frustum_handles: Dict[str, viser.CameraFrustumHandle] = {}
