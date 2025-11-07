@@ -153,19 +153,19 @@ class FrankaPyrokiViserAgent(Agent):
                     if key not in self.camera_frustum_handles:
                         self.camera_frustum_handles[key] = self.viser_server.scene.add_camera_frustum(
                             name = f"camera_frustum_{key}",
-                            fov = 60.0,
+                            fov = 1.2,
                             aspect = 1.0,
-                            scale = 0.01,
+                            scale = 0.05,
                             cast_shadow = False,
                             receive_shadow = False,
                         )
                     self.camera_frustum_handles[key].image = resize_with_center_crop(image, 224, 224)
 
-                    # For now these are hardcoded, but we should attach extrinsics files to sensor and pass to obs
+                    # For now these are hardcoded, TODO: Should attach extrinsics files to sensor class obj and pass extr to obs
 
                     self.camera_frustum_handles[key].position = (1.0, 0, 0.28)
 
-                    self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 + np.pi/6, 0.0, -np.pi/2).wxyz
+                    self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
 
                     if "depth_data" in obs_copy[key]:
                         depth_data = obs_copy[key]["depth_data"]
@@ -176,7 +176,7 @@ class FrankaPyrokiViserAgent(Agent):
                             subsample_factor = 4,
                             depth_clip_range = (0.015, 1.2),
                         )
-                        self.viser_server.scene.add_point_cloud(name = f"camera_frustum_{key}/point_cloud_{key}", points = points, colors = colors, point_size = 0.002, wxyz = vtf.SO3.from_rpy_radians(0.0, 0.0, np.pi).wxyz)
+                        self.viser_server.scene.add_point_cloud(name = f"camera_frustum_{key}/point_cloud_{key}", points = points, colors = colors, point_size = 0.002)
                 
                 time.sleep(self._update_period)
 
