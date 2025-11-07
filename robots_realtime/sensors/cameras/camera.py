@@ -207,7 +207,6 @@ if __name__ == "__main__":
     """
     import yaml
     from tqdm import tqdm
-
     from yam_realtime.utils.portal_utils import launch_remote_get_local_handler
 
     camera_config = yaml.safe_load(cfg)

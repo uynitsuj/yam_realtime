@@ -11,7 +11,6 @@ import pyroki as pk
 import viser.extras
 import viser.transforms as vtf
 
-from robots_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik import solve_ik
 from robots_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik_vel_cost import solve_ik as solve_ik_vel_cost
 from robots_realtime.robots.viser.viser_base import ViserAbstractBase
 
@@ -94,7 +93,18 @@ class FrankaPyroki(ViserAbstractBase):
         self.robot = pk.Robot.from_urdf(self.urdf)
         cfg = np.array(self.urdf.cfg, dtype=float)
         # Hardcoded to be close to first solve of IK
-        self.rest_pose = np.array([ 4.5195120e-04, -4.1407236e-01, -4.3886289e-04, -2.5841961, -2.1377161e-04,  2.1701238e+00,  7.8556901e-01,  2.0000000e-02])
+        self.rest_pose = np.array(
+            [
+                4.5195120e-04,
+                -4.1407236e-01,
+                -4.3886289e-04,
+                -2.5841961,
+                -2.1377161e-04,
+                2.1701238e00,
+                7.8556901e-01,
+                2.0000000e-02,
+            ]
+        )
 
     def _setup_gui(self) -> None:
         super()._setup_gui()
@@ -189,4 +199,3 @@ class FrankaPyroki(ViserAbstractBase):
 
 
 __all__ = ["FrankaPyroki"]
-

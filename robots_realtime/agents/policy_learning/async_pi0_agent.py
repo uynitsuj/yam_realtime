@@ -208,4 +208,3 @@ class AsyncDiffusionAgent(PolicyAgent):
         else:
             action = self._agent.get_action(self._obs)["actions"]
         return action
-

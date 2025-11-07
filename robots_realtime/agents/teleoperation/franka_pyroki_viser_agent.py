@@ -39,9 +39,9 @@ class FrankaPyrokiViserAgent(Agent):
         self.bimanual = bimanual
         self.right_arm_extrinsic = right_arm_extrinsic
         if self.bimanual:
-            assert (
-                right_arm_extrinsic is not None
-            ), "right_arm_extrinsic must be provided for bimanual Franka configuration"
+            assert right_arm_extrinsic is not None, (
+                "right_arm_extrinsic must be provided for bimanual Franka configuration"
+            )
 
         self.viser_server = viser.ViserServer()
         self.ik = FrankaPyroki(
@@ -97,9 +97,7 @@ class FrankaPyrokiViserAgent(Agent):
             self.ik.base_frame_right.position = np.array(self.right_arm_extrinsic["position"])
             self.ik.base_frame_right.wxyz = np.array(self.right_arm_extrinsic["rotation"])
 
-            self.base_frame_right_real = self.viser_server.scene.add_frame(
-                "/franka_real/right", show_axes=False
-            )
+            self.base_frame_right_real = self.viser_server.scene.add_frame("/franka_real/right", show_axes=False)
             self.base_frame_right_real.position = self.ik.base_frame_right.position
             self.urdf_vis_right_real = viser.extras.ViserUrdf(
                 self.viser_server,
@@ -112,9 +110,13 @@ class FrankaPyrokiViserAgent(Agent):
 
         self.viser_cam_img_handles: Dict[str, viser.GuiImageHandle] = {}
 
-        self.left_gripper_slider_handle = self.viser_server.gui.add_slider(label="Gripper Width", min=0.0, max=0.08, step=0.001, initial_value=0.08)
+        self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
+            label="Gripper Width", min=0.0, max=0.08, step=0.001, initial_value=0.08
+        )
         if self.bimanual:
-            self.right_gripper_slider_handle = self.viser_server.gui.add_slider(label="Gripper Width (R)", min=0.0, max=0.08, step=0.001, initial_value=0.08)
+            self.right_gripper_slider_handle = self.viser_server.gui.add_slider(
+                label="Gripper Width (R)", min=0.0, max=0.08, step=0.001, initial_value=0.08
+            )
 
     def _update_visualization(self) -> None:
         """Continuously sync live robot state and camera frames into Viser."""
@@ -177,4 +179,3 @@ class FrankaPyrokiViserAgent(Agent):
 
 
 __all__ = ["FrankaPyrokiViserAgent"]
-

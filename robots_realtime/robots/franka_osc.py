@@ -31,6 +31,7 @@ Kp_null = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
 damping_ratio = 8.0
 Kd_null = damping_ratio * 2.0 * np.sqrt(Kp_null)
 
+
 def orientation_error(current_rot: np.ndarray, desired_rot: np.ndarray) -> np.ndarray:
     """
     Compute orientation error in axis-angle form (3-vector).
@@ -83,7 +84,6 @@ class FrankaPanda(Robot):
         import panda_py
         from panda_py import controllers
 
-
         self._joint_state_saver = None
         self.name = name or "franka"
         self.host_name = host_name
@@ -101,7 +101,7 @@ class FrankaPanda(Robot):
         if enable_gripper:
             self.gripper = panda_py.libfranka.Gripper(host_name)
             self.gripper.grasp(0.0, 10.0, 1.0)
-            self.gripper.grasp(0.08, 10.0, 1.0) # Max width is 0.08m
+            self.gripper.grasp(0.08, 10.0, 1.0)  # Max width is 0.08m
             self._num_dofs += 1
             self._gripper_lock = Lock()
             self._gripper_update_event = Event()
@@ -207,7 +207,7 @@ class FrankaPanda(Robot):
                     dq_null = -Kp_null * (q - joint_cmd) - Kd_null * dq
                     Jbar = Mq_inv @ J.T @ Mx
                     if hasattr(self, "gripper"):
-                        tau_null = (np.eye(self._num_dofs-1) - J.T @ Jbar.T) @ dq_null
+                        tau_null = (np.eye(self._num_dofs - 1) - J.T @ Jbar.T) @ dq_null
                     else:
                         tau_null = (np.eye(self._num_dofs) - J.T @ Jbar.T) @ dq_null
 
@@ -250,12 +250,13 @@ class FrankaPanda(Robot):
 
     def get_observations(self) -> Dict[str, np.ndarray]:
         obs = {
-            "joint_pos": self.state.q if not hasattr(self, "gripper") else np.concatenate([self.state.q, [self._last_gripper_state]]),
+            "joint_pos": self.state.q
+            if not hasattr(self, "gripper")
+            else np.concatenate([self.state.q, [self._last_gripper_state]]),
             "joint_vel": self.state.dq,
             "joint_eff": self.state.tau_J,
         }
         return obs
-
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         """Exit the runtime context related to this object."""
@@ -311,7 +312,7 @@ class FrankaPanda(Robot):
                     self.gripper.move(width, 10.0)
                 else:
                     self.gripper.grasp(width, 10.0, 2.0)
-                
+
                 self._last_gripper_command = width
                 self._last_gripper_state = self.gripper.read_once().width
             except Exception:
@@ -321,4 +322,3 @@ class FrankaPanda(Robot):
         with self._gripper_lock:
             self._gripper_target_width = width
             self._gripper_update_event.set()
-
