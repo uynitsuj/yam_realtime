@@ -162,7 +162,7 @@ class ZedCamera(CameraDriver):
 
         return self.depth_map.get_data()
 
-    def read(self, read_depth: bool = False) -> CameraData:
+    def read(self) -> CameraData:
         result = {}
         if self.zed.grab(self.runtime_parameters) == sl.ERROR_CODE.SUCCESS:
             self.zed.retrieve_image(self.image_left, sl.VIEW.LEFT)
@@ -179,7 +179,6 @@ class ZedCamera(CameraDriver):
 
             # np.ascontiguousarray will slow down the read function, but it can speed up video saving.
             # Video saving is the current bottleneck, to speed it up, we make this trade-off.
-            # see https://github.com/xdofai/lab42/pull/525#discussion_r2180271629
 
             if self.concat_image:
                 left_rgb = np.ascontiguousarray(left_bgra[:, :, :3][:, :, ::-1])
@@ -195,7 +194,7 @@ class ZedCamera(CameraDriver):
                     images={"left_rgb": left_rgb, "right_rgb": right_rgb},
                     timestamp=ts_image - self.image_transfer_time_offset_ms,
                 )
-            if read_depth:
+            if self.enable_depth:
                 self.zed.retrieve_measure(self.depth_map, sl.MEASURE.DEPTH)
                 depth_map_data = self.depth_map.get_data()
                 result.depth_data = depth_map_data

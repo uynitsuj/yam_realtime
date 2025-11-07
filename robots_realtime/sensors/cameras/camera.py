@@ -125,6 +125,8 @@ class CameraNode:
         return dict(
             images=self.latest_data.images,
             timestamp=self.latest_data.timestamp,
+            depth_data=self.latest_data.depth_data if self.latest_data.depth_data is not None else None,
+            intrinsics=self.camera.read_calibration_data_intrinsics() if self.camera.intrinsic_data is not None else None,
         )
 
     @remote(serialization_needed=True)

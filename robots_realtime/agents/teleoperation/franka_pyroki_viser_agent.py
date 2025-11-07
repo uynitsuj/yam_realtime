@@ -10,13 +10,14 @@ from typing import Any, Dict, Optional
 import numpy as np
 import viser
 import viser.extras
+import viser.transforms as vtf
 from dm_env.specs import Array
 
 from robots_realtime.agents.agent import Agent
 from robots_realtime.robots.inverse_kinematics.franka_pyroki import FrankaPyroki
 from robots_realtime.sensors.cameras.camera_utils import obs_get_rgb, resize_with_center_crop
 from robots_realtime.utils.portal_utils import remote
-
+from robots_realtime.utils.depth_utils import depth_color_to_pointcloud
 
 class FrankaPyrokiViserAgent(Agent):
     """Interactive teleoperation agent for Franka OSC robots.
@@ -117,6 +118,9 @@ class FrankaPyrokiViserAgent(Agent):
             self.right_gripper_slider_handle = self.viser_server.gui.add_slider(
                 label="Gripper Width (R)", min=0.0, max=0.08, step=0.001, initial_value=0.08
             )
+        
+        self.camera_frustum_handles: Dict[str, viser.CameraFrustumHandle] = {}
+        
 
     def _update_visualization(self) -> None:
         """Continuously sync live robot state and camera frames into Viser."""
@@ -146,7 +150,35 @@ class FrankaPyrokiViserAgent(Agent):
                         self.viser_cam_img_handles[key] = self.viser_server.gui.add_image(image, label=key)
                     self.viser_cam_img_handles[key].image = resize_with_center_crop(image, 224, 224)
 
-            time.sleep(self._update_period)
+                    if key not in self.camera_frustum_handles:
+                        self.camera_frustum_handles[key] = self.viser_server.scene.add_camera_frustum(
+                            name = f"camera_frustum_{key}",
+                            fov = 60.0,
+                            aspect = 1.0,
+                            scale = 0.01,
+                            cast_shadow = False,
+                            receive_shadow = False,
+                        )
+                    self.camera_frustum_handles[key].image = resize_with_center_crop(image, 224, 224)
+
+                    # For now these are hardcoded, but we should attach extrinsics files to sensor and pass to obs
+
+                    self.camera_frustum_handles[key].position = (1.0, 0, 0.28)
+
+                    self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 + np.pi/6, 0.0, -np.pi/2).wxyz
+
+                    if "depth_data" in obs_copy[key]:
+                        depth_data = obs_copy[key]["depth_data"]
+                        points, colors = depth_color_to_pointcloud(
+                            depth = depth_data,
+                            rgb_img = image,
+                            intrinsics = obs_copy[key]["intrinsics"]["left"]["intrinsics_matrix"], # We assume we're taking left camera image from a stereo pair
+                            subsample_factor = 4,
+                            depth_clip_range = (0.015, 1.2),
+                        )
+                        self.viser_server.scene.add_point_cloud(name = f"camera_frustum_{key}/point_cloud_{key}", points = points, colors = colors, point_size = 0.002, wxyz = vtf.SO3.from_rpy_radians(0.0, 0.0, np.pi).wxyz)
+                
+                time.sleep(self._update_period)
 
     # ------------------------------------------------------------------
     # Agent interface

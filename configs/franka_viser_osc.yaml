@@ -9,6 +9,7 @@ sensors:
             resolution: "HD720"
             fps: 30
             device_id: "24400334"
+            enable_depth: true
 
 robots:
   left: ["robot_configs/franka/franka_default_panda_gripper.yaml"]

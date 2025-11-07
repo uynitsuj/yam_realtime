@@ -22,6 +22,7 @@ dependencies = [
     "ruff",
     "pyroki @ git+https://github.com/chungmin99/pyroki.git",
     "panda_python",
+    "matplotlib",
 ]
 
 
