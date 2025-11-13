@@ -71,16 +71,7 @@ class AsyncThroughputClient:
 ###############################################################################
 
 async def main():
-    # Run server in background
-    # server = TestServer()
-    # asyncio.create_task(server.run_forever())
-
-    # Wait for server
-    # await asyncio.sleep(0.5)
-
-    # Run throughput test
-    # await throughput_test(host="128.32.175.42", duration_sec=3, packet_size=128 * 1024 * 5)  # try 64 KB, 128 KB, 1 MB, etc.
-
+    
     # client = AsyncThroughputClient(host="128.32.175.42")
     client = AsyncThroughputClient(host="0.0.0.0")
     await client.run_test(duration=3, packet_size=128 * 1024 * 10)
