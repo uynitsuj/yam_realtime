@@ -93,19 +93,19 @@ class RobotEnv(dm_env.Environment):
                 robot_futures[name] = robot_obs
 
         for name, robot_obs_future in robot_futures.items():
-            start_time = time.time()
+            # start_time = time.time()
             robot_obs = robot_obs_future.result()
             observations[name] = robot_obs
-            end_time = time.time()
-            print(f"time taken to get robot data for {name}: {(end_time - start_time) * 1000} ms")
+            # end_time = time.time()
+            # print(f"time taken to get robot data for {name}: {(end_time - start_time) * 1000} ms")
 
         for name, camera_data_future in camera_futures.items():
-            start_time = time.time()
+            # start_time = time.time()
             camera_data = camera_data_future.result()
             assert name not in observations
             observations[name] = camera_data
-            end_time = time.time()
-            print(f"time taken to get camera data for {name}: {(end_time - start_time) * 1000} ms")
+            # end_time = time.time()
+            # print(f"time taken to get camera data for {name}: {(end_time - start_time) * 1000} ms")
         observations["timestamp_end"] = time.time()
 
         return observations

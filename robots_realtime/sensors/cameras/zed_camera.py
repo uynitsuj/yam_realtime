@@ -164,7 +164,7 @@ class ZedCamera(CameraDriver):
         return self.depth_map.get_data()
 
     def read(self) -> CameraData:
-        start_time = time.time()
+        # start_time = time.time()
         result = {}
         if self.zed.grab(self.runtime_parameters) == sl.ERROR_CODE.SUCCESS:
             self.zed.retrieve_image(self.image_left, sl.VIEW.LEFT)
@@ -223,8 +223,8 @@ class ZedCamera(CameraDriver):
             else:
                 result = CameraData(images={"left_rgb": None, "right_rgb": None}, timestamp=-1.0)  # type: ignore
 
-        end_time = time.time()
-        print(f"time taken to read camera data: {(end_time - start_time) * 1000} ms")
+        # end_time = time.time()
+        # print(f"time taken to read camera data: {(end_time - start_time) * 1000} ms")
         return result
 
     def read_calibration_data_intrinsics(self) -> dict:
