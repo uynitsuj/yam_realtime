@@ -87,7 +87,7 @@ def _solve_ik_jax(
             robot,
             joint_var,
             prev_cfg,
-            0.01,  # dt
+            0.05,  # dt
             3.0,
         ),
     ]
