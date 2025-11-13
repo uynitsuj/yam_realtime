@@ -65,6 +65,7 @@ class ZedCamera(CameraDriver):
     device_id: str | None = None
     image_transfer_time_offset_ms: float = 70  # unit: ms,
     concat_image: bool = False  # if True, concat the left and right image, it might slow down the read frequency.
+    return_right_image: bool = False
     name: str | None = None
     enable_depth: bool = False
 
@@ -93,7 +94,7 @@ class ZedCamera(CameraDriver):
         #     raise ValueError(f"Invalid fps for resolution {self.resolution}. Valid fps are {RESOLUTION_TO_VALID_FPS[self.resolution]}")
         init_params.camera_fps = self.fps  # Set fps at 30
         if self.enable_depth:
-            init_params.depth_mode = sl.DEPTH_MODE.NEURAL
+            init_params.depth_mode = sl.DEPTH_MODE.NEURAL_LIGHT
             init_params.coordinate_units = sl.UNIT.METER
         else:
             init_params.depth_mode = sl.DEPTH_MODE.NONE
@@ -163,25 +164,34 @@ class ZedCamera(CameraDriver):
         return self.depth_map.get_data()
 
     def read(self) -> CameraData:
+        start_time = time.time()
         result = {}
         if self.zed.grab(self.runtime_parameters) == sl.ERROR_CODE.SUCCESS:
             self.zed.retrieve_image(self.image_left, sl.VIEW.LEFT)
-            self.zed.retrieve_image(self.image_right, sl.VIEW.RIGHT)
+            if self.return_right_image:
+                self.zed.retrieve_image(self.image_right, sl.VIEW.RIGHT)
             # for zed, timestamp is the timestamp of the image arrives to the computer memory
             ts_image = int(self.zed.get_timestamp(sl.TIME_REFERENCE.IMAGE).get_microseconds() / 1000)
 
             left_bgra = self.image_left.get_data()
-            right_bgra = self.image_right.get_data()
+            if self.return_right_image:
+                right_bgra = self.image_right.get_data()
+            else:
+                right_bgra = None
             # check if left or right is all black, if so raise runtime error. see SWE-381.
             # Downsample the image to 1% of the original size to speed up the check. On some station, this checker might take a longer time.
-            if np.all(left_bgra[::10, ::10, :3] < 8) or np.all(right_bgra[::10, ::10, :3] < 8):
-                raise RuntimeError(f"Zed camera {self.device_id} one camera is all black")
+            if np.all(left_bgra[::10, ::10, :3] < 8):
+                raise RuntimeError(f"Zed camera {self.device_id} left camera is all black")
+            if self.return_right_image and np.all(right_bgra[::10, ::10, :3] < 8):
+                raise RuntimeError(f"Zed camera {self.device_id} right camera is all black")
 
             # np.ascontiguousarray will slow down the read function, but it can speed up video saving.
             # Video saving is the current bottleneck, to speed it up, we make this trade-off.
 
             if self.concat_image:
                 left_rgb = np.ascontiguousarray(left_bgra[:, :, :3][:, :, ::-1])
+                if not self.return_right_image:
+                    raise RuntimeError("concat_image is True, but return_right_image is False")
                 right_rgb = np.ascontiguousarray(right_bgra[:, :, :3][:, :, ::-1])
                 result = CameraData(
                     images={"rgb": np.concatenate([left_rgb, right_rgb], axis=1)},
@@ -189,15 +199,22 @@ class ZedCamera(CameraDriver):
                 )
             else:
                 left_rgb = np.ascontiguousarray(left_bgra[:, :, :3][:, :, ::-1])
-                right_rgb = np.ascontiguousarray(right_bgra[:, :, :3][:, :, ::-1])
-                result = CameraData(
-                    images={"left_rgb": left_rgb, "right_rgb": right_rgb},
-                    timestamp=ts_image - self.image_transfer_time_offset_ms,
-                )
+                if self.return_right_image:
+                    right_rgb = np.ascontiguousarray(right_bgra[:, :, :3][:, :, ::-1])
+                    result = CameraData(
+                        images={"left_rgb": left_rgb, "right_rgb": right_rgb},
+                        timestamp=ts_image - self.image_transfer_time_offset_ms,
+                    )
+                else:
+                    result = CameraData(
+                        images={"left_rgb": left_rgb},
+                        timestamp=ts_image - self.image_transfer_time_offset_ms,
+                    )
+                
             if self.enable_depth:
                 self.zed.retrieve_measure(self.depth_map, sl.MEASURE.DEPTH)
                 depth_map_data = self.depth_map.get_data()
-                result.depth_data = depth_map_data
+                result.depth_data = np.ascontiguousarray(depth_map_data)
         else:
             logging.warning(f"{self}: Failed to grab image from ZED camera")
             # Return empty images on failure to maintain type consistency
@@ -206,6 +223,8 @@ class ZedCamera(CameraDriver):
             else:
                 result = CameraData(images={"left_rgb": None, "right_rgb": None}, timestamp=-1.0)  # type: ignore
 
+        end_time = time.time()
+        print(f"time taken to read camera data: {(end_time - start_time) * 1000} ms")
         return result
 
     def read_calibration_data_intrinsics(self) -> dict:

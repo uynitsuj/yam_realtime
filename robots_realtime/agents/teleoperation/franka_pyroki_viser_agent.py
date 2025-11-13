@@ -36,9 +36,11 @@ class FrankaPyrokiViserAgent(Agent):
         right_arm_extrinsic: Optional[Dict[str, Any]] = None,
         robot_description: Optional[str] = None,
         ik_rate: float = 100.0,
+        visualize_rgbd: bool = True,
     ) -> None:
         self.bimanual = bimanual
         self.right_arm_extrinsic = right_arm_extrinsic
+        self.visualize_rgbd = visualize_rgbd
         if self.bimanual:
             assert right_arm_extrinsic is not None, (
                 "right_arm_extrinsic must be provided for bimanual Franka configuration"
@@ -147,8 +149,9 @@ class FrankaPyrokiViserAgent(Agent):
             if rgb_images:
                 for key, image in rgb_images.items():
                     if key not in self.viser_cam_img_handles:
-                        self.viser_cam_img_handles[key] = self.viser_server.gui.add_image(image, label=key)
-                    self.viser_cam_img_handles[key].image = resize_with_center_crop(image, 224, 224)
+                        self.viser_cam_img_handles[key] = self.viser_server.gui.add_image(resize_with_center_crop(image, 224, 224), label=key)
+                    if self.visualize_rgbd:
+                        self.viser_cam_img_handles[key].image = resize_with_center_crop(image, 224, 224)
 
                     if key not in self.camera_frustum_handles:
                         self.camera_frustum_handles[key] = self.viser_server.scene.add_camera_frustum(
@@ -159,7 +162,8 @@ class FrankaPyrokiViserAgent(Agent):
                             cast_shadow = False,
                             receive_shadow = False,
                         )
-                    self.camera_frustum_handles[key].image = resize_with_center_crop(image, 224, 224)
+                    if self.visualize_rgbd:
+                        self.camera_frustum_handles[key].image = resize_with_center_crop(image, 224, 224)
 
                     # For now these are hardcoded, TODO: Should attach extrinsics files to sensor class obj and pass extr to obs
 
@@ -167,7 +171,7 @@ class FrankaPyrokiViserAgent(Agent):
 
                     self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
 
-                    if "depth_data" in obs_copy[key]:
+                    if "depth_data" in obs_copy[key] and self.visualize_rgbd:
                         depth_data = obs_copy[key]["depth_data"]
                         points, colors = depth_color_to_pointcloud(
                             depth = depth_data,
