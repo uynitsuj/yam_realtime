@@ -65,7 +65,7 @@ class MsgpackNumpyServer:
         return out
 
 class MsgpackNumpyClient:
-    def __init__(self, host="127.0.0.1", port=9000):
+    def __init__(self, host="0.0.0.0", port=9000):
         self.host = host
         self.port = port
         self.reader = None
@@ -86,3 +86,17 @@ class MsgpackNumpyClient:
         if self.writer:
             self.writer.close()
             await self.writer.wait_closed()
+
+class SyncMsgpackNumpyClient:
+    def __init__(self, host="0.0.0.0", port=9000):
+        self._client = MsgpackNumpyClient(host, port)
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_until_complete(self._client.connect())
+
+    def send_request(self, data: dict) -> dict:
+        return self._loop.run_until_complete(self._client.send_request(data))
+
+    def close(self):
+        self._loop.run_until_complete(self._client.close())
+        self._loop.close()

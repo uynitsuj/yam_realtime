@@ -19,7 +19,4 @@ agent:
 
 station_metadata:
   world_frame: "base"
-  station_layout_version: "0.1.0"
   arm_type: "franka"
-  gripper_version: "0.1.0"
-  station_name: "us_02"

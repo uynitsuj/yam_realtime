@@ -1,0 +1,24 @@
+_target_: robots_realtime.envs.launch.LaunchConfig
+
+sensors:
+  cameras:
+    top_camera:
+          _target_: robots_realtime.sensors.cameras.camera.CameraNode
+          camera:
+            _target_: robots_realtime.sensors.cameras.zed_camera.ZedCamera
+            resolution: "HD720"
+            fps: 30
+            device_id: "24400334"
+            enable_depth: true
+
+robots:
+  left: ["robot_configs/franka/franka_default_panda_gripper.yaml"]
+
+agent:
+  _target_: robots_realtime.agents.client.franka_osc_client_cartesian.FrankaOscClientCartesianAgent
+
+station_metadata:
+  world_frame: "base"
+  station_layout_version: "0.1.0"
+  arm_type: "franka"
+  gripper_version: "0.1.0"
