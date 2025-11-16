@@ -8,6 +8,7 @@
 *.pywz
 *.pyzw
 *.pyzwz
+*.png
 __pycache__/
 .venv/
 .ruff_cache/
