@@ -47,6 +47,9 @@ class FrankaOscClientCartesianAgent(Agent):
                 "right_arm_extrinsic must be provided for bimanual Franka configuration"
             )
 
+        self.hyrl_joint_pos = None
+        self.hyrl_gripper_pos = None
+
         self.viser_server = viser.ViserServer()
         self.ik = FrankaPyroki(
             rate=ik_rate,
@@ -100,6 +103,16 @@ class FrankaOscClientCartesianAgent(Agent):
         for mesh in self.urdf_vis_left_real._meshes:
             mesh.opacity = 0.3  # type: ignore[attr-defined]
 
+        self.base_frame_left_hyrl = self.viser_server.scene.add_frame("/franka_hyrl", show_axes=False)
+        self.urdf_vis_left_hyrl = viser.extras.ViserUrdf(
+            self.viser_server,
+            deepcopy(self.ik.urdf),
+            root_node_name="/franka_hyrl",
+            mesh_color_override=(0.55, 0.35, 0.95),
+        )
+        for mesh in self.urdf_vis_left_hyrl._meshes:
+            mesh.opacity = 0.3  # type: ignore[attr-defined]
+
         if self.bimanual and self.right_arm_extrinsic is not None:
             self.ik.base_frame_right.position = np.array(self.right_arm_extrinsic["position"])
             self.ik.base_frame_right.wxyz = np.array(self.right_arm_extrinsic["rotation"])
@@ -143,6 +156,9 @@ class FrankaOscClientCartesianAgent(Agent):
             left_joint_pos = self._extract_joint_pos(obs_copy, "left")
             if left_joint_pos is not None:
                 self.urdf_vis_left_real.update_cfg(left_joint_pos)
+
+            if self.hyrl_joint_pos is not None:
+                self.urdf_vis_left_hyrl.update_cfg(np.concatenate([self.hyrl_joint_pos, [self.hyrl_gripper_pos*0.08]]))
 
             if self.bimanual:
                 right_joint_pos = self._extract_joint_pos(obs_copy, "right")
@@ -198,6 +214,10 @@ class FrankaOscClientCartesianAgent(Agent):
         self.obs["top_camera"]["pose"] = np.concatenate([np.array([1.0, 0, 0.28]), vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz])
         # self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
         response = self.franka_client.send_request(self.obs)
+
+        if response.get(b'left') is not None:
+            self.hyrl_joint_pos = np.asarray(response.get(b'left').get(b'joint_pos'), dtype=np.float32)
+            self.hyrl_gripper_pos = np.asarray(response.get(b'left').get(b'gripper'), dtype=np.float32)
         print(response)
 
         left_target = np.asarray(self.ik.joints["left"], dtype=np.float32)
