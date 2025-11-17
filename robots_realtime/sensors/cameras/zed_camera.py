@@ -94,8 +94,9 @@ class ZedCamera(CameraDriver):
         #     raise ValueError(f"Invalid fps for resolution {self.resolution}. Valid fps are {RESOLUTION_TO_VALID_FPS[self.resolution]}")
         init_params.camera_fps = self.fps  # Set fps at 30
         if self.enable_depth:
-            init_params.depth_mode = sl.DEPTH_MODE.NEURAL_LIGHT
+            init_params.depth_mode = sl.DEPTH_MODE.NEURAL
             init_params.coordinate_units = sl.UNIT.METER
+
         else:
             init_params.depth_mode = sl.DEPTH_MODE.NONE
 
@@ -121,6 +122,8 @@ class ZedCamera(CameraDriver):
 
         self.camera_info = self.zed.get_camera_information()
         self.runtime_parameters = sl.RuntimeParameters()
+        self.runtime_parameters.confidence_threshold = 75
+        # self.runtime_parameters.texture_confidence_threshold = 99
         self.camera_type = self.camera_info.camera_model.name
 
         self.intrinsic_data = {

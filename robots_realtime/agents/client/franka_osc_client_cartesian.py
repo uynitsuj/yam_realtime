@@ -224,6 +224,9 @@ class FrankaOscClientCartesianAgent(Agent):
         left_target[-1] = self.left_gripper_slider_handle.value
         action: Dict[str, Dict[str, np.ndarray]] = {"left": {"pos": left_target}}
 
+        if response.get(b'left') is not None:
+            action: Dict[str, Dict[str, np.ndarray]] = {"left": {"pos": np.concatenate([self.hyrl_joint_pos, [self.hyrl_gripper_pos*0.08]])}}
+
         if self.bimanual:
             assert "right" in self.ik.joints, "bimanual mode requires both IK solutions"
             right_target = np.asarray(self.ik.joints["right"], dtype=np.float32)

@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 ###############################################################################
 # Single Kp, Kd for both position and orientation in OSC
 ###############################################################################
-KP_OSC = 130.0
-KD_OSC = 30.0
+# KP_OSC = 130.0
+KP_OSC = 100.0
+# KD_OSC = 30.0
+KD_OSC = 42.0
 
 # We'll build 6D arrays for the translational + rotational dimensions:
 KP_6D = np.full(6, KP_OSC)  # [100, 100, 100, 100, 100, 100]
@@ -30,7 +32,7 @@ KD_6D = np.full(6, KD_OSC)  # [ 20,  20,  20,  20,  20,  20]
 # Kp_null = np.array([75.0, 75.0, 50.0, 50.0, 40.0, 25.0, 25.0])
 # Kp_null = np.array([30.0, 30.0, 25.0, 25.0, 20.0, 10.0, 10.0])
 Kp_null = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
-damping_ratio = 8.0
+damping_ratio = 5.0
 Kd_null = damping_ratio * 2.0 * np.sqrt(Kp_null)
 
 GRIPPER_DEFAULT_SPEED = 10.0
@@ -124,7 +126,7 @@ class FrankaPanda(Robot):
             self._gripper_thread.start()
 
         # reduce collision sensitivity for enabling contact rich behavoir
-        self.torque_limit = 9.0
+        self.torque_limit = 14.5
         self.interface.get_robot().set_collision_behavior([100.0] * 7, [100.0] * 7, [100.0] * 6, [100.0] * 6)
         self.model = self.interface.get_model()
         self.frame = panda_py.libfranka.Frame.kFlange
@@ -227,9 +229,10 @@ class FrankaPanda(Robot):
                     # command torque
                     tau = tau_task + tau_null
                     tau = np.clip(tau, -self.torque_limit, self.torque_limit)
-                    if time.time() - self.ctrl_thread_start_time < 6.00 and np.linalg.norm(err_6d) > 0.01:
+                    # tau[-1] = np.clip(tau[-1], -1.25, 1.25)
+                    if time.time() - self.ctrl_thread_start_time < 10.00 and np.linalg.norm(err_6d) > 0.01:
                         tau = np.clip(
-                            tau, -3.0, 3.0
+                            tau, -2.0, 2.0
                         )  # If far away from home pose at init, clip torque to avoid high velocity homing
                     self.ctrl.set_control(tau)
 

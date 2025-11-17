@@ -93,15 +93,27 @@ class FrankaPyroki(ViserAbstractBase):
         self.robot = pk.Robot.from_urdf(self.urdf)
         cfg = np.array(self.urdf.cfg, dtype=float)
         # Hardcoded to be close to first solve of IK
+        # self.rest_pose = np.array(
+        #     [
+        #         4.5195120e-04,
+        #         -4.1407236e-01,
+        #         -4.3886289e-04,
+        #         -2.5841961,
+        #         -2.1377161e-04,
+        #         2.1701238e00,
+        #         7.8556901e-01,
+        #         2.0000000e-02,
+        #     ]
+        # )
         self.rest_pose = np.array(
             [
-                4.5195120e-04,
-                -4.1407236e-01,
-                -4.3886289e-04,
-                -2.5841961,
-                -2.1377161e-04,
-                2.1701238e00,
-                7.8556901e-01,
+                0.02560678,
+                -0.50020427,
+                -0.02167408,
+                -2.3739204,
+                -0.01089052,
+                1.8737985,
+                -2.3463573,
                 2.0000000e-02,
             ]
         )
@@ -113,8 +125,8 @@ class FrankaPyroki(ViserAbstractBase):
             self.timing_handle_right = self.viser_server.gui.add_number("Right Arm Time (ms)", 0.01, disabled=True)
 
     def _initialize_transform_handles(self) -> None:
-        default_position = (0.4, 0.0, 0.4)
-        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi, np.pi).wxyz
+        default_position = (0.45, 0.0, 0.15)
+        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi, 0.0).wxyz
 
         left_handle = self.transform_handles.get("left")
         if left_handle and left_handle.control is not None:
@@ -163,8 +175,10 @@ class FrankaPyroki(ViserAbstractBase):
             )
             elapsed_ms = (time.time() - start) * 1000.0
 
-            solution[-1] = 0.06  # For mitigating visualization gripper jitter from diff IK solver
+            # solution[-1] = 0.06  # For mitigating visualization gripper jitter from diff IK solver
             self.joints[side] = solution
+
+            # print(f"Solution: {solution}")
 
             if side == "left":
                 self.timing_handle_left.value = elapsed_ms  # type: ignore[attr-defined]
