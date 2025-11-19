@@ -177,7 +177,7 @@ class FrankaPyrokiViserAgent(Agent):
 
                     # For now these are hardcoded, TODO: Should attach extrinsics files to sensor class obj and pass extr to obs
 
-                    self.camera_frustum_handles[key].position = (0.985, 0, 0.28)
+                    self.camera_frustum_handles[key].position = (1.0, 0, 0.28)
 
                     self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
 

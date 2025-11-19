@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 # Single Kp, Kd for both position and orientation in OSC
 ###############################################################################
 # KP_OSC = 90.0 # original panda gripper
-KP_OSC = 150.0 # robotiq gripper
+KP_OSC = 90.0 # robotiq gripper
 
-KD_OSC = 55.0
+KD_OSC = 65.0
 
 # We'll build 6D arrays for the translational + rotational dimensions:
 KP_6D = np.full(6, KP_OSC)  # [100, 100, 100, 100, 100, 100]

@@ -6,4 +6,4 @@ robots:
   - _target_: robots_realtime.robots.robotiq_gripper.RobotiqGripperRobot 
     port: "/dev/robotiq"
     default_speed: 255
-    default_force: 255
+    default_force: 40

@@ -1,3 +1,4 @@
+# This one is kinda wack p shaky and jerky compared to osc
 _target_: robots_realtime.robots.robot.ConcatenatedRobot
 robots:
   - _target_: robots_realtime.robots.franka_joint_ctrl.FrankaPanda
