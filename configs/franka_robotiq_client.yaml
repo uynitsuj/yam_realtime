@@ -7,16 +7,19 @@ sensors:
           camera:
             _target_: robots_realtime.sensors.cameras.zed_camera.ZedCamera
             resolution: "HD720"
-            fps: 30
+            fps: 15
             device_id: "35062621"
             enable_depth: true
 
 robots:
-  left: ["robot_configs/franka/franka_default_panda_gripper.yaml"]
+  left: ["robot_configs/franka/franka_robotiq_gripper.yaml"]
 
 agent:
-  _target_: robots_realtime.agents.teleoperation.franka_pyroki_viser_agent.FrankaPyrokiViserAgent
+  _target_: robots_realtime.agents.client.franka_osc_client_cartesian.FrankaOscClientCartesianAgent
+  robotiq_gripper: true
+  visualize_rgbd: false
 
+hz: 15.0
 station_metadata:
   world_frame: "base"
   arm_type: "franka"

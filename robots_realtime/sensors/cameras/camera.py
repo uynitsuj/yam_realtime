@@ -75,7 +75,7 @@ class CameraDriver(Protocol):
 @dataclass
 class CameraNode:
     camera: CameraDriver
-    timeout_sec: float = 0.2  # configurable timeout
+    timeout_sec: float = 1.0  # configurable timeout
 
     def __post_init__(self):
         self.latest_data: Optional[CameraData] = None

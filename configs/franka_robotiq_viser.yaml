@@ -12,10 +12,11 @@ sensors:
             enable_depth: true
 
 robots:
-  left: ["robot_configs/franka/franka_default_panda_gripper.yaml"]
+  left: ["robot_configs/franka/franka_robotiq_gripper.yaml"]
 
 agent:
   _target_: robots_realtime.agents.teleoperation.franka_pyroki_viser_agent.FrankaPyrokiViserAgent
+  robotiq_gripper: true
 
 station_metadata:
   world_frame: "base"

@@ -25,6 +25,7 @@ dependencies = [
     "matplotlib",
     "msgpack",
     "msgpack_numpy",
+    "minimalmodbus",
 ]
 
 

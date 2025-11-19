@@ -6,9 +6,9 @@ sensors:
           _target_: robots_realtime.sensors.cameras.camera.CameraNode
           camera:
             _target_: robots_realtime.sensors.cameras.zed_camera.ZedCamera
-            resolution: "HD720"
+            resolution: "SVGA"
             fps: 30
-            device_id: "24400334"
+            device_id: "35062621"
             enable_depth: true
 
 robots:

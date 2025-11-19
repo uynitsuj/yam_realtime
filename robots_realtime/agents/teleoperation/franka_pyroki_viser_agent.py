@@ -37,10 +37,12 @@ class FrankaPyrokiViserAgent(Agent):
         robot_description: Optional[str] = None,
         ik_rate: float = 100.0,
         visualize_rgbd: bool = True,
+        robotiq_gripper: bool = False,
     ) -> None:
         self.bimanual = bimanual
         self.right_arm_extrinsic = right_arm_extrinsic
         self.visualize_rgbd = visualize_rgbd
+        self.robotiq_gripper = robotiq_gripper
         if self.bimanual:
             assert right_arm_extrinsic is not None, (
                 "right_arm_extrinsic must be provided for bimanual Franka configuration"
@@ -53,6 +55,9 @@ class FrankaPyrokiViserAgent(Agent):
             bimanual=bimanual,
             robot_description=robot_description,
         )
+        if self.robotiq_gripper:
+            self.ik.transform_handles.get("left").tcp_offset_frame.wxyz = vtf.SO3.from_rpy_radians(0.0, 0.0, np.pi/4).wxyz
+            self.ik.transform_handles.get("left").tcp_offset_frame.position = (0.0, 0.0, -0.157)
         self.ik_thread = threading.Thread(target=self.ik.run, name="franka_pyroki_ik")
         self.ik_thread.daemon = True
         self.ik_thread.start()
@@ -113,9 +118,14 @@ class FrankaPyrokiViserAgent(Agent):
 
         self.viser_cam_img_handles: Dict[str, viser.GuiImageHandle] = {}
 
-        self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
-            label="Gripper Width", min=0.0, max=0.1, step=0.001, initial_value=0.1
-        )
+        if self.robotiq_gripper:
+            self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
+                label="Gripper Width", min=0.0, max=1.0, step=0.005, initial_value=1.0
+            )
+        else:
+            self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
+                label="Gripper Width", min=0.0, max=0.1, step=0.001, initial_value=0.1
+            )
         if self.bimanual:
             self.right_gripper_slider_handle = self.viser_server.gui.add_slider(
                 label="Gripper Width (R)", min=0.0, max=0.1, step=0.001, initial_value=0.1

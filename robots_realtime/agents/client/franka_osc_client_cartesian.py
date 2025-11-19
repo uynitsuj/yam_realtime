@@ -38,8 +38,10 @@ class FrankaOscClientCartesianAgent(Agent):
         robot_description: Optional[str] = None,
         ik_rate: float = 100.0,
         visualize_rgbd: bool = True,
+        robotiq_gripper: bool = False,
     ) -> None:
         self.bimanual = bimanual
+        self.robotiq_gripper = robotiq_gripper
         self.right_arm_extrinsic = right_arm_extrinsic
         self.visualize_rgbd = visualize_rgbd
         if self.bimanual:
@@ -60,6 +62,10 @@ class FrankaOscClientCartesianAgent(Agent):
         self.ik_thread = threading.Thread(target=self.ik.run, name="franka_pyroki_ik")
         self.ik_thread.daemon = True
         self.ik_thread.start()
+
+        if self.robotiq_gripper:
+            self.ik.transform_handles.get("left").tcp_offset_frame.wxyz = vtf.SO3.from_rpy_radians(0.0, 0.0, np.pi/4).wxyz
+            self.ik.transform_handles.get("left").tcp_offset_frame.position = (0.0, 0.0, -0.157)
 
         self.franka_client = SyncMsgpackNumpyClient(host="0.0.0.0", port=9000)
         # self.franka_client.connect()
@@ -130,9 +136,15 @@ class FrankaOscClientCartesianAgent(Agent):
 
         self.viser_cam_img_handles: Dict[str, viser.GuiImageHandle] = {}
 
-        self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
-            label="Gripper Width", min=0.0, max=0.1, step=0.001, initial_value=0.1
-        )
+        if not self.robotiq_gripper:
+            self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
+                label="Gripper Width", min=0.0, max=0.1, step=0.001, initial_value=0.1
+            )
+        else:
+            self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
+                label="Gripper Width", min=0.0, max=1.0, step=0.005, initial_value=1.0
+            )
+            
         if self.bimanual:
             self.right_gripper_slider_handle = self.viser_server.gui.add_slider(
                 label="Gripper Width (R)", min=0.0, max=0.1, step=0.001, initial_value=0.1
@@ -225,7 +237,11 @@ class FrankaOscClientCartesianAgent(Agent):
         action: Dict[str, Dict[str, np.ndarray]] = {"left": {"pos": left_target}}
 
         if response.get(b'left') is not None:
-            action: Dict[str, Dict[str, np.ndarray]] = {"left": {"pos": np.concatenate([self.hyrl_joint_pos, [self.hyrl_gripper_pos*0.08]])}}
+            if not self.robotiq_gripper:
+                gripper_act = self.hyrl_gripper_pos*0.08
+            else:
+                gripper_act = self.hyrl_gripper_pos
+            action: Dict[str, Dict[str, np.ndarray]] = {"left": {"pos": np.concatenate([self.hyrl_joint_pos, [gripper_act]])}}
 
         if self.bimanual:
             assert "right" in self.ik.joints, "bimanual mode requires both IK solutions"

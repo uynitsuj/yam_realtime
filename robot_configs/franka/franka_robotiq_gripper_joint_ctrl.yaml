@@ -1,0 +1,9 @@
+_target_: robots_realtime.robots.robot.ConcatenatedRobot
+robots:
+  - _target_: robots_realtime.robots.franka_joint_ctrl.FrankaPanda
+    host_name: "172.16.0.1"
+
+  - _target_: robots_realtime.robots.robotiq_gripper.RobotiqGripperRobot 
+    port: "/dev/robotiq"
+    default_speed: 255
+    default_force: 255
