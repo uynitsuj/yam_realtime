@@ -1,6 +1,6 @@
 # Robot Realtime Control Interfaces
 
-Robots Realtime is a modular software stack for realtime control, teleoperation, and policy integration on various robot embodiments including bi-manual I2RT YAM arms, Franka Panda, (more to come...).
+Robots Realtime is a research codebase supporting modular software stacks for realtime control, teleoperation, and policy integration on real-world robot embodiments including bi-manual I2RT YAM arms, Franka Panda, (more to come...).
 
 It provides extensible pythonic infrastructure for low-latency joint command streaming, agent-based policy control, visualization, and integration with inverse kinematics solvers like [pyroki](https://github.com/chungmin99/pyroki) developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
 
