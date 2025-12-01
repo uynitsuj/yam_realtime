@@ -37,7 +37,7 @@ class FrankaOscClientCartesianAgent(Agent):
         right_arm_extrinsic: Optional[Dict[str, Any]] = None,
         robot_description: Optional[str] = None,
         ik_rate: float = 100.0,
-        visualize_rgbd: bool = True,
+        visualize_rgbd: bool = False,
         robotiq_gripper: bool = False,
     ) -> None:
         self.bimanual = bimanual
