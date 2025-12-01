@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 # Single Kp, Kd for both position and orientation in OSC
 ###############################################################################
 # KP_OSC = 90.0 # original panda gripper
-KP_OSC = 90.0 # robotiq gripper
+KP_OSC = 100.0 # robotiq gripper
 
-KD_OSC = 65.0
+KD_OSC = 60.0
 
 # We'll build 6D arrays for the translational + rotational dimensions:
 KP_6D = np.full(6, KP_OSC)  # [100, 100, 100, 100, 100, 100]
@@ -126,7 +126,7 @@ class FrankaPanda(Robot):
             self._gripper_thread.start()
 
         # reduce collision sensitivity for enabling contact rich behavoir
-        self.torque_limit = 7.5
+        self.torque_limit = 4.5
         self.interface.get_robot().set_collision_behavior([100.0] * 7, [100.0] * 7, [100.0] * 6, [100.0] * 6)
         self.model = self.interface.get_model()
         self.frame = panda_py.libfranka.Frame.kFlange
