@@ -7,7 +7,7 @@ name = "robots_realtime"
 version = "0.1.0"
 description = "A collection of realtime & high-frequency control interfaces for robot arms"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "viser",
     "tyro",
@@ -19,19 +19,21 @@ dependencies = [
     "numpy",
     "opencv-python",
     "robot_descriptions",
+    "yourdfpy",
     "ruff",
     "pyroki @ git+https://github.com/chungmin99/pyroki.git",
-    "panda_python",
     "matplotlib",
     "msgpack",
     "msgpack_numpy",
     "minimalmodbus",
 ]
 
-
 [project.optional-dependencies]
 sensors = [
     "pyzed",
+]
+franka_panda = [
+    "panda_python",
 ]
 
 [tool.uv.sources]
@@ -39,12 +41,10 @@ panda_python = { path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_pyth
 pyzed = { path = "dependencies/pyzed-5.1-cp311-cp311-linux_x86_64.whl" }
 
 [tool.uv]
-environments = [
-    "sys_platform == 'darwin'",
-    "sys_platform == 'linux'",
-]
 override-dependencies = [
     "numpy==1.26.4",
+    "jax==0.4.26",
+    "jaxlib==0.4.26",
 ]
 
 [tool.setuptools.packages.find]
@@ -104,7 +104,7 @@ docstring-code-format = true
 skip-magic-trailing-comma = false
 
 [tool.pyright]
-pythonVersion = "3.12"
+pythonVersion = "3.11"
 ignore = ["dependencies/**", "robots_realtime/scripts/**"]
 
 reportMissingImports = "none"

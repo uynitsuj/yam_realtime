@@ -12,6 +12,9 @@ import viser
 import viser.extras
 import viser.transforms as vtf
 
+import yourdfpy
+import os
+
 try:
     from robot_descriptions.loaders.yourdfpy import load_robot_description as load_urdf_robot_description
 except ImportError as e:
@@ -48,13 +51,17 @@ class ViserAbstractBase(ABC):
         self.bimanual = bimanual
         self.coordinate_frame = coordinate_frame
 
-        # Load robot description with error handling
-        try:
-            self.urdf = load_urdf_robot_description(robot_description)
-        except Exception as e:
-            print(f"Error loading robot description '{robot_description}': {e}")
-            print("Please ensure the robot description is properly installed.")
-            exit()
+        self.urdf = load_urdf_robot_description(robot_description)
+
+        if robot_description == "yam_description": # temporary fix for yam_description
+            # current path
+            current_path = os.path.dirname(os.path.abspath(__file__))
+            urdf_path = os.path.join(current_path, "..", "..", "..", "dependencies", "i2rt", "i2rt", "robot_models", "yam", "yam.urdf")
+            mesh_dir = os.path.join(current_path, "..", "..", "..", "dependencies", "i2rt", "i2rt", "robot_models", "yam", "assets")
+            self.urdf = yourdfpy.URDF.load(
+                urdf_path,
+                mesh_dir=mesh_dir,
+            )
 
         self.viser_server = viser_server if viser_server is not None else viser.ViserServer()
 
