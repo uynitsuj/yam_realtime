@@ -51,7 +51,6 @@ class ViserAbstractBase(ABC):
         self.bimanual = bimanual
         self.coordinate_frame = coordinate_frame
 
-        self.urdf = load_urdf_robot_description(robot_description)
 
         if robot_description == "yam_description": # temporary fix for yam_description
             # current path
@@ -62,6 +61,9 @@ class ViserAbstractBase(ABC):
                 urdf_path,
                 mesh_dir=mesh_dir,
             )
+        else:
+            self.urdf = load_urdf_robot_description(robot_description)
+
 
         self.viser_server = viser_server if viser_server is not None else viser.ViserServer()
 
