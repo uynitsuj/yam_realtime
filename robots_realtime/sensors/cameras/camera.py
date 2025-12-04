@@ -90,7 +90,6 @@ class CameraNode:
         print(f"stopevent: {self.stop_event.is_set()}")
         while not self.stop_event.is_set():
             try:
-                # with Timeout(1.5):
                 latest_data = self.camera.read()
                 with self.lock:
                     self.latest_data = latest_data

@@ -69,7 +69,6 @@ class OpencvCamera(CameraDriver):
 
     def get_camera_info(self) -> dict:
         info = {}
-        # opencv resolution does not match zed resolution, but our config is set as zed resolution ,so it can be used temporarily
         info.update(
             {
                 "camera_type": self.camera_type,

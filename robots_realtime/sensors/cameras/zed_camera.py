@@ -181,7 +181,7 @@ class ZedCamera(CameraDriver):
                 right_bgra = self.image_right.get_data()
             else:
                 right_bgra = None
-            # check if left or right is all black, if so raise runtime error. see SWE-381.
+            # check if left or right is all black, if so raise runtime error.
             # Downsample the image to 1% of the original size to speed up the check. On some station, this checker might take a longer time.
             if np.all(left_bgra[::10, ::10, :3] < 8):
                 raise RuntimeError(f"Zed camera {self.device_id} left camera is all black")
