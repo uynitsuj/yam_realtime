@@ -68,7 +68,6 @@ class FrankaOscClientCartesianAgent(Agent):
             self.ik.transform_handles.get("left").tcp_offset_frame.position = (0.0, 0.0, -0.157)
 
         self.franka_client = SyncMsgpackNumpyClient(host="0.0.0.0", port=9000)
-        # self.franka_client.connect()
 
         self.obs: Optional[Dict[str, Any]] = None
         self._update_period = 0.05
@@ -90,7 +89,6 @@ class FrankaOscClientCartesianAgent(Agent):
             if joint_pos is not None:
                 return np.asarray(joint_pos)
 
-        # Fall back to top-level fields if the environment exposes single-arm observations.
         if arm == "left" and obs.get("joint_pos") is not None:
             return np.asarray(obs["joint_pos"])
 
