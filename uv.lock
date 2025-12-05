@@ -395,7 +395,7 @@ wheels = [
 [[package]]
 name = "i2rt"
 version = "0.0.1"
-source = { directory = "dependencies/i2rt" }
+source = { editable = "dependencies/i2rt" }
 dependencies = [
     { name = "click" },
     { name = "dm-env" },
@@ -1312,7 +1312,7 @@ requires-dist = [
     { name = "dm-control", specifier = "==1.0.30" },
     { name = "dm-env", specifier = "==1.6" },
     { name = "dotdict", specifier = "==0.1" },
-    { name = "i2rt", directory = "dependencies/i2rt" },
+    { name = "i2rt", editable = "dependencies/i2rt" },
     { name = "matplotlib" },
     { name = "minimalmodbus" },
     { name = "msgpack" },

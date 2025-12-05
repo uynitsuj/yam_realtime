@@ -11,12 +11,13 @@ motor_chain:
     - [0x07, "DM4310"]
   motor_offset: [0, 0, 0, 0, 0, 0, 0]
   motor_direction: [1, 1, 1, 1, 1, 1, 1]
-  channel: "can_left"
+  # channel: "can_left"
+  channel: "can_follow_l"
   motor_chain_name: "yam_left"
   receive_mode:
     _target_: i2rt.motor_drivers.dm_driver.ReceiveMode
     value: "p16"
-xml_path: "dependencies/i2rt/robot_models/yam/yam.xml"
+xml_path: "dependencies/i2rt/i2rt/robot_models/yam/yam.xml"
 gravity_comp_factor: 1.3
 gripper_index: 6
 kp: [80, 80, 80, 10, 10, 10, 20]

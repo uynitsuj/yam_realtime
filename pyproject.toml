@@ -40,7 +40,7 @@ franka_panda = [
 [tool.uv.sources]
 panda_python = { path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_python-0.7.5+libfranka.0.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" }
 pyzed = { path = "dependencies/pyzed-5.1-cp311-cp311-linux_x86_64.whl" }
-i2rt = { path = "dependencies/i2rt" }
+i2rt = { path = "dependencies/i2rt", editable = true }
 
 [tool.uv]
 override-dependencies = [

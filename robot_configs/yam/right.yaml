@@ -1,4 +1,5 @@
 motor_chain:
-  channel: "can_right"
+  # channel: "can_right"
+  channel: "can_follow_r"
   motor_chain_name: "yam_right"
 gripper_limits: [0.0, -2.4] # a smaller opening, full opening is -2.7
