@@ -25,7 +25,6 @@ source .venv/bin/activate
 
 uv venv --python 3.11
 uv pip install -e .
-uv pip install dependencies/i2rt/
 ```
 ## Configuration
 If using YAM arms, configure YAM arms CAN chain according to instructions from the [I2RT repo](https://github.com/i2rt-robotics/i2rt)
@@ -38,6 +37,7 @@ uv run robots_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.y
 ```
 For Franka Panda:
 ```bash
+uv sync --extra sensors --extra franka_panda
 uv run robots_realtime/envs/launch.py --config_path configs/franka_viser_osc.yaml
 ```
 

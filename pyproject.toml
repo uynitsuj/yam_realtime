@@ -7,7 +7,7 @@ name = "robots_realtime"
 version = "0.1.0"
 description = "A collection of realtime & high-frequency control interfaces for robot arms"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "viser",
     "tyro",
@@ -26,6 +26,7 @@ dependencies = [
     "msgpack",
     "msgpack_numpy",
     "minimalmodbus",
+    "i2rt",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +40,7 @@ franka_panda = [
 [tool.uv.sources]
 panda_python = { path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_python-0.7.5+libfranka.0.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" }
 pyzed = { path = "dependencies/pyzed-5.1-cp311-cp311-linux_x86_64.whl" }
+i2rt = { path = "dependencies/i2rt" }
 
 [tool.uv]
 override-dependencies = [
