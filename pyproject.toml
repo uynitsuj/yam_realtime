@@ -21,12 +21,16 @@ dependencies = [
     "robot_descriptions",
     "yourdfpy",
     "ruff",
-    "pyroki @ git+https://github.com/chungmin99/pyroki.git",
+    # "pyroki @ git+https://github.com/chungmin99/pyroki.git",
+    "pyroki",
+    "jaxls",
     "matplotlib",
     "msgpack",
     "msgpack_numpy",
     "minimalmodbus",
     "i2rt",
+    "uvicorn",
+    "fastapi",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +42,8 @@ franka_panda = [
 ]
 
 [tool.uv.sources]
+pyroki = { path = "dependencies/pyroki", editable = true }
+jaxls = { path = "dependencies/jaxls", editable = true }
 panda_python = { path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_python-0.7.5+libfranka.0.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" }
 pyzed = { path = "dependencies/pyzed-5.1-cp311-cp311-linux_x86_64.whl" }
 i2rt = { path = "dependencies/i2rt", editable = true }
@@ -45,8 +51,6 @@ i2rt = { path = "dependencies/i2rt", editable = true }
 [tool.uv]
 override-dependencies = [
     "numpy==1.26.4",
-    "jax==0.4.26",
-    "jaxlib==0.4.26",
 ]
 
 [tool.setuptools.packages.find]

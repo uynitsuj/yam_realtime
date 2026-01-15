@@ -28,7 +28,7 @@ def limit_velocity_cost(
     return (residual * weight).flatten()
 
 
-def solve_ik(
+def solve_ik_vel_cost(
     robot: pk.Robot,
     target_link_name: str,
     target_wxyz: onp.ndarray,
@@ -76,7 +76,7 @@ def _solve_ik_jax(
             jaxlie.SE3.from_rotation_and_translation(jaxlie.SO3(target_wxyz), target_position),
             target_link_index,
             pos_weight=50.0,
-            ori_weight=10.0,
+            ori_weight=20.0,
         ),
         pk.costs.limit_cost(
             robot,
@@ -88,7 +88,7 @@ def _solve_ik_jax(
             joint_var,
             prev_cfg,
             0.01,  # dt
-            2.0,
+            0.1,
         ),
     ]
     sol = (
