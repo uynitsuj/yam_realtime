@@ -24,6 +24,7 @@ from robots_realtime.utils.launch_utils import (
     initialize_sensors,
     setup_can_interfaces,
     setup_logging,
+    run_server_proc,
 )
 
 
@@ -54,6 +55,7 @@ def main(args: Args) -> None:
     6. Create environment
     7. Run control loop
     """
+
     # Setup logging and get logger
     logger = setup_logging()
     logger.info("Starting realtime control system...")
@@ -66,6 +68,15 @@ def main(args: Args) -> None:
 
         agent_cfg = configs_dict.pop("agent")
         sensors_cfg = configs_dict.pop("sensors", None)
+        api_servers = configs_dict.pop("api_servers", None)
+
+        server_procs = []
+
+        if api_servers is not None:
+            for api_server in api_servers:
+                server_proc = run_server_proc(api_server)
+                print(f"API server {api_server} started")
+                server_procs.append(server_proc)
         main_config = instantiate(configs_dict)
 
         logger.info("Initializing sensors...")

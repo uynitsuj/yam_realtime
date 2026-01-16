@@ -30,6 +30,17 @@ class TransformHandle:
     tcp_offset_frame: viser.FrameHandle
     control: Optional[viser.TransformControlsHandle] = None
 
+def set_min_distance_from_limits(urdf: yourdfpy.URDF, min_distance_from_limits: float = 0.15) -> yourdfpy.URDF:
+    """
+    Set the minimum distance from limits for the robot.
+    min_distance_from_limits: float in radians
+    """
+    for joint in urdf.robot.joints:
+        if joint.type == "revolute" and joint.limit is not None:
+            if joint.limit.lower is not None and joint.limit.upper is not None:
+                joint.limit.lower = joint.limit.lower + min_distance_from_limits
+                joint.limit.upper = joint.limit.upper - min_distance_from_limits
+    return urdf
 
 class ViserAbstractBase(ABC):
     """
@@ -62,7 +73,7 @@ class ViserAbstractBase(ABC):
                 mesh_dir=mesh_dir,
             )
         else:
-            self.urdf = load_urdf_robot_description(robot_description)
+            self.urdf = set_min_distance_from_limits(load_urdf_robot_description(robot_description))
 
 
         self.viser_server = viser_server if viser_server is not None else viser.ViserServer()

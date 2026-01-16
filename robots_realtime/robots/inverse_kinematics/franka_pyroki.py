@@ -11,9 +11,8 @@ import pyroki as pk
 import viser.extras
 import viser.transforms as vtf
 
-from robots_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik_vel_cost import solve_ik as solve_ik_vel_cost
+from robots_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik_vel_cost import solve_ik_vel_cost as solve_ik_vel_cost
 from robots_realtime.robots.viser.viser_base import ViserAbstractBase
-
 
 class FrankaPyroki(ViserAbstractBase):
     """Interactive Franka Panda inverse kinematics helper.
@@ -113,7 +112,7 @@ class FrankaPyroki(ViserAbstractBase):
                 -2.3739204,
                 -0.01089052,
                 1.8737985,
-                -2.3463573,
+                -2.3463573 + np.pi/2,
                 2.0000000e-02,
             ]
         )

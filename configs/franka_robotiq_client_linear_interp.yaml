@@ -1,0 +1,33 @@
+_target_: robots_realtime.envs.launch.LaunchConfig
+
+sensors:
+  cameras:
+    top_camera:
+          _target_: robots_realtime.sensors.cameras.camera.CameraNode
+          camera:
+            _target_: robots_realtime.sensors.cameras.zed_camera.ZedCamera
+            resolution: "HD720"
+            fps: 15
+            device_id: "35062621"
+            enable_depth: true
+
+robots:
+  left: ["robot_configs/franka/franka_robotiq_gripper.yaml"]
+
+agent:
+  _target_: robots_realtime.agents.client.franka_osc_client_cartesian_interp.FrankaOscClientCartesianAgent
+  robotiq_gripper: true
+  visualize_rgbd: false
+
+api_servers:
+  - _target_: robots_realtime.serving.serve_pyroki_linear_interp.main
+    robot: panda_description
+    target_link: panda_hand
+    port: 8116
+    host: 127.0.0.1
+
+
+hz: 20.0
+station_metadata:
+  world_frame: "base"
+  arm_type: "franka"

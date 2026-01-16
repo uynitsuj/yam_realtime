@@ -19,9 +19,23 @@ from robots_realtime.utils.portal_utils import (
     RemoteServer,
     launch_remote_get_local_handler,
 )
+import multiprocessing
+
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
+
+
+def run_server_proc(api_cfg) -> multiprocessing.Process:
+    # Make sure we use spawn for CUDA
+    ctx = multiprocessing.get_context("spawn")
+    proc = ctx.Process(
+        target=instantiate,  # child will call main(**cfg) via Hydra-style instantiate
+        args=(api_cfg,),
+        daemon=True,
+    )
+    proc.start()
+    return proc
 
 
 def setup_logging() -> logging.Logger:

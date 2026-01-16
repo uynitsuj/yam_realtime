@@ -59,6 +59,7 @@ def plan_trajectory_linear_ik(
     start_wxyz: np.ndarray,
     end_pos: np.ndarray,
     end_wxyz: np.ndarray,
+    prev_cfg: np.ndarray | None = None,
     num_waypoints: int = 25,
     use_prev_cfg: bool = True,
     jump_threshold: float = 0.5,
@@ -87,7 +88,6 @@ def plan_trajectory_linear_ik(
 
     # Solve IK for each waypoint
     trajectory = []
-    prev_cfg = None
     jump_warnings = []
 
     for i, (pos, wxyz) in enumerate(zip(positions, orientations)):
@@ -171,6 +171,7 @@ class PlanRequest(BaseModel):
     start_pose_wxyz_xyz: list[float]  # length 7: wxyz quaternion + xyz position
     end_pose_wxyz_xyz: list[float]  # length 7: wxyz quaternion + xyz position
     timesteps: int = 20
+    prev_cfg: list[float] | None = None  # optional
 
 
 class PlanResponse(BaseModel):
@@ -303,6 +304,7 @@ async def plan_motion(req: PlanRequest):
     end_position = end_pose[4:]
 
     timesteps = req.timesteps
+    prev_cfg = np.array(req.prev_cfg, dtype=np.float64) if req.prev_cfg is not None else None
 
     try:
         start_time = time.time()
@@ -314,6 +316,7 @@ async def plan_motion(req: PlanRequest):
             end_pos=end_position,
             end_wxyz=end_wxyz,
             num_waypoints=timesteps,
+            prev_cfg=prev_cfg,
         )
         sol_traj = np.asarray(sol_traj)
         end_time = time.time()
