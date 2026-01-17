@@ -73,7 +73,7 @@ class ViserAbstractBase(ABC):
                 mesh_dir=mesh_dir,
             )
         else:
-            self.urdf = set_min_distance_from_limits(load_urdf_robot_description(robot_description))
+            self.urdf = set_min_distance_from_limits(load_urdf_robot_description(robot_description), min_distance_from_limits=0.25)
 
 
         self.viser_server = viser_server if viser_server is not None else viser.ViserServer()

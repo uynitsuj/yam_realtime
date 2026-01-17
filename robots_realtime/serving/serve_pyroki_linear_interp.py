@@ -227,6 +227,17 @@ def _build_world_coll(obstacles: list[dict[str, Any]] | None):
 # SERVER INIT — Load Pyroki Only Once
 # =====================================================
 
+def set_min_distance_from_limits(urdf: yourdfpy.URDF, min_distance_from_limits: float = 0.15) -> yourdfpy.URDF:
+    """
+    Set the minimum distance from limits for the robot.
+    min_distance_from_limits: float in radians
+    """
+    for joint in urdf.robot.joints:
+        if joint.type == "revolute" and joint.limit is not None:
+            if joint.limit.lower is not None and joint.limit.upper is not None:
+                joint.limit.lower = joint.limit.lower + min_distance_from_limits
+                joint.limit.upper = joint.limit.upper - min_distance_from_limits
+    return urdf
 
 def init_pyroki_server(
     robot_urdf_name: str = "panda_description", target_link_name: str = "panda_hand"
@@ -238,6 +249,7 @@ def init_pyroki_server(
     from robot_descriptions.loaders.yourdfpy import load_robot_description
 
     urdf = load_robot_description(robot_urdf_name)
+    urdf = set_min_distance_from_limits(urdf, min_distance_from_limits=0.25)
 
     _ROBOT = pk.Robot.from_urdf(urdf)
     # _ROBOT_COLL = pk.collision.RobotCollision.from_urdf(urdf)

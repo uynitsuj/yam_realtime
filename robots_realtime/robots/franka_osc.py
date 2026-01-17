@@ -19,24 +19,25 @@ logger = logging.getLogger(__name__)
 ###############################################################################
 # Single Kp, Kd for both position and orientation in OSC
 ###############################################################################
-# KP_OSC = 90.0 # original panda gripper
-# KP_OSC = 100.0 # robotiq gripper
+# Try lowering orientation P and increasing orientation D ratio
+KP_pos = 100.0
+KD_pos = 40.0
+KP_ori = 120.0
+KD_ori = 40.0
 
-KP_OSC = 100.0 # for traj interp mode
+# Define these as constants or class attributes
+MAX_POS_ERR = 0.075  # Caps max force/velocity for translation
+MAX_ORI_ERR = 0.5   # Caps max torque/velocity for rotation
 
-# KD_OSC = 55.0
-KD_OSC = 35.0 # for traj interp mode
-
-# We'll build 6D arrays for the translational + rotational dimensions:
-KP_6D = np.full(6, KP_OSC)  # [100, 100, 100, 100, 100, 100]
-KD_6D = np.full(6, KD_OSC)  # [ 20,  20,  20,  20,  20,  20]
+KP_6D = np.array([KP_pos]*3 + [KP_ori]*3)
+KD_6D = np.array([KD_pos]*3 + [KD_ori]*3)
 
 # Joint impedance for null space (example, can be changed)
 # Kp_null = np.array([75.0, 75.0, 50.0, 50.0, 40.0, 25.0, 25.0])
 # Kp_null = np.array([30.0, 30.0, 25.0, 25.0, 20.0, 10.0, 10.0])
 # Kp_null = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
-Kp_null = np.array([25.0, 20.0, 5.0, 3.0, 3.0, 3.0, 3.0])
-damping_ratio = 0.5
+Kp_null = np.array([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])
+damping_ratio = 0.6
 Kd_null = damping_ratio * 2.0 * np.sqrt(Kp_null)
 
 GRIPPER_DEFAULT_SPEED = 10.0
@@ -130,7 +131,7 @@ class FrankaPanda(Robot):
             self._gripper_thread.start()
 
         # reduce collision sensitivity for enabling contact rich behavoir
-        self.torque_limit = 4.5
+        self.torque_limit = 26.5
         self.interface.get_robot().set_collision_behavior([100.0] * 7, [100.0] * 7, [100.0] * 6, [100.0] * 6)
         self.model = self.interface.get_model()
         self.frame = panda_py.libfranka.Frame.kFlange
@@ -199,6 +200,22 @@ class FrankaPanda(Robot):
                     # twist error
                     err_6d = np.concatenate([dx, dtheta])
 
+                    # Split error for clipping
+                    pos_err = err_6d[:3]
+                    ori_err = err_6d[3:]
+
+                    # Clip the magnitude to preserve direction (better than clipping per-axis)
+                    pos_norm = np.linalg.norm(pos_err)
+                    if pos_norm > MAX_POS_ERR:
+                        pos_err = (pos_err / pos_norm) * MAX_POS_ERR
+
+                    ori_norm = np.linalg.norm(ori_err)
+                    if ori_norm > MAX_ORI_ERR:
+                        ori_err = (ori_err / ori_norm) * MAX_ORI_ERR
+
+                    # Reassemble
+                    err_6d_clipped = np.concatenate([pos_err, ori_err])
+
                     # mass matrix and augmentation
                     Mq = self.model.mass(state)
                     Mq = np.array(Mq).reshape(7, 7)
@@ -219,7 +236,12 @@ class FrankaPanda(Robot):
 
                     # task-space
                     dX = J @ dq
-                    F_task = KP_6D * err_6d - KD_6D * dX
+
+                    # F_task = KP_6D * err_6d - KD_6D * dX
+
+                    # Using err_6d_clipped for F_task calculation
+                    F_task = KP_6D * err_6d_clipped - KD_6D * dX
+
                     tau_task = J.T @ (Mx @ F_task)
 
                     # null-space
@@ -236,11 +258,12 @@ class FrankaPanda(Robot):
                     tau[-1] = np.clip(tau[-1], -1.25, 1.25)
                     time_buff = 20.00
                     if time.time() - self.ctrl_thread_start_time < time_buff and np.linalg.norm(err_6d) > 0.01:
-                        print(tau)
                         # start with 2.0 then slowly increase to 100.0 as ctrl_thread_start_time gets closer to time_buff
                         clip_value = 1.0 + np.clip((20.0 - 1.0) * ((time.time() - self.ctrl_thread_start_time) - 5.0) / time_buff, 0.0, 20.0)
                         tau = np.clip(tau, -clip_value, clip_value)  # If far away from home pose at init, clip torque to avoid high velocity homing
                         print(f"Clipping torque to {clip_value}")
+                        print(tau)
+
                     self.ctrl.set_control(tau)
 
                     if self._joint_state_saver is not None:

@@ -19,7 +19,6 @@ agent:
   robotiq_gripper: true
   visualize_rgbd: false
 
-hz: 15.0
 station_metadata:
   world_frame: "base"
   arm_type: "franka"

@@ -27,7 +27,7 @@ api_servers:
     host: 127.0.0.1
 
 
-hz: 20.0
+# hz: 20.0
 station_metadata:
   world_frame: "base"
   arm_type: "franka"

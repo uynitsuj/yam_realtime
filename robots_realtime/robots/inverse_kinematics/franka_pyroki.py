@@ -112,7 +112,7 @@ class FrankaPyroki(ViserAbstractBase):
                 -2.3739204,
                 -0.01089052,
                 1.8737985,
-                -2.3463573 + np.pi/2,
+                -2.3463573 + np.pi*3/2,
                 2.0000000e-02,
             ]
         )
@@ -124,8 +124,8 @@ class FrankaPyroki(ViserAbstractBase):
             self.timing_handle_right = self.viser_server.gui.add_number("Right Arm Time (ms)", 0.01, disabled=True)
 
     def _initialize_transform_handles(self) -> None:
-        default_position = (0.45, 0.0, 0.2)
-        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi, 0.0).wxyz
+        default_position = (0.45, 0.0, 0.25)
+        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi, 0.0-np.pi/2).wxyz
 
         left_handle = self.transform_handles.get("left")
         if left_handle and left_handle.control is not None:

@@ -285,12 +285,12 @@ class FrankaPyrokiViserAgentLinearInterp(Agent):
             ori_error = np.linalg.norm(self.real_eef_frame_left.wxyz - target_orientation)
             if i == len(joint_trajectory_waypoints) - 1:
                 while pos_error > 0.015 or ori_error > 0.02:
-                    time.sleep(0.05)
+                    time.sleep(0.15)
                     pos_error = np.linalg.norm(self.real_eef_frame_left.position - target_position)
                     ori_error = np.linalg.norm(self.real_eef_frame_left.wxyz - target_orientation)
                     print(f"Pos error: {pos_error}, Ori error: {ori_error}")
             else:
-                time.sleep(0.1)
+                time.sleep(0.05)
         self._curr_joint_target = self.obs["left"]["joint_pos"]
         self.executing_traj = False
 
