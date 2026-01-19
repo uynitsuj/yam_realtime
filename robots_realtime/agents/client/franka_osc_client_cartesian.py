@@ -197,7 +197,7 @@ class FrankaOscClientCartesianAgent(Agent):
 
                     # For now these are hardcoded, TODO: Should attach extrinsics files to sensor class obj and pass extr to obs
 
-                    self.camera_frustum_handles[key].position = (1.01, 0, 0.29)
+                    self.camera_frustum_handles[key].position = (1.009, 0, 0.29)
 
                     self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
 
@@ -221,7 +221,7 @@ class FrankaOscClientCartesianAgent(Agent):
         self.obs = deepcopy(obs)
 
         # For now camera extrinsics are hardcoded, TODO: Should attach extrinsics files to sensor class obj and pass extr to obs
-        self.obs["top_camera"]["pose"] = np.concatenate([np.array([1.01, 0, 0.29]), vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz])
+        self.obs["top_camera"]["pose"] = np.concatenate([np.array([1.009, 0, 0.29]), vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz])
         self.obs["top_camera"]["pose_mat"] = vtf.SE3(wxyz_xyz=np.concatenate([self.obs["top_camera"]["pose"][3:], self.obs["top_camera"]["pose"][:3]])).as_matrix()
         # self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
         response = self.franka_client.send_request(self.obs)
