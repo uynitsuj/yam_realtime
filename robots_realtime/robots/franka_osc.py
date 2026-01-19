@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 # Try lowering orientation P and increasing orientation D ratio
 KP_pos = 150.0
 KD_pos = 30.0
-KP_ori = 160.0
-KD_ori = 30.0
+KP_ori = 170.0
+KD_ori = 25.0
 
 # Define these as constants or class attributes
 MAX_POS_ERR = 0.08  # Caps max force/velocity for translation
-MAX_ORI_ERR = 0.35   # Caps max torque/velocity for rotation
+MAX_ORI_ERR = 0.2   # Caps max torque/velocity for rotation
 
 KP_6D = np.array([KP_pos]*3 + [KP_ori]*3)
 KD_6D = np.array([KD_pos]*3 + [KD_ori]*3)
