@@ -35,10 +35,14 @@ For Bimanual YAMS:
 ```bash
 uv run robots_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
 ```
-For Franka Panda:
+For Franka Panda (with default panda gripper):
 ```bash
 uv sync --extra sensors --extra franka_panda
 uv run robots_realtime/envs/launch.py --config_path configs/franka_viser_osc.yaml
+```
+or for robotiq gripper (ensure flange orientation is correct):
+```bash
+uv run robots_realtime/envs/launch.py --config_path configs/franka_robotiq_client.yaml
 ```
 
 ## Extending with Custom Agents
