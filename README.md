@@ -19,7 +19,7 @@ git submodule update --init --recursive
 ```
 Install the main package and I2RT repo for CAN driver interface using uv:
 ```bash
-cd yam_realtime
+cd robots_realtime
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source .venv/bin/activate
 
