@@ -1,0 +1,33 @@
+# YAM MuJoCo Simulation driven by GELLO feetech leader device
+#
+# Usage (macOS requires mjpython for the viewer):
+#   DYLD_LIBRARY_PATH=~/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/lib \
+#     .venv/bin/mjpython robots_realtime/envs/launch.py \
+#       --config-path configs/yam_gello_mujoco_sim.yaml
+#
+# Or headless (render: false):
+#   uv run python robots_realtime/envs/launch.py \
+#       --config-path configs/yam_gello_mujoco_sim.yaml
+
+_target_: robots_realtime.envs.launch.LaunchConfig
+sim_mode: true
+hz: 50.0
+
+robots:
+  left:
+    _target_: robots_realtime.robots.mujoco_sim_robot.MujocoSimRobot
+    xml_path: "dependencies/i2rt/i2rt/robot_models/yam/yam.xml"
+    render: true
+
+agent:
+  _target_: robots_realtime.agents.teleoperation.gello_leader_agent.GelloLeaderAgent
+  port: "/dev/tty.usbmodem5AE60805531"
+  robot_name: "left"
+  calibrate: true
+  drive_to_zero: true       # actively drive all motors to zero cfg on startup
+  hold_gripper: true           # adaptive spring on the trigger
+  include_gripper: true     # MuJoCo model has no gripper joint
+  # Flip / offset individual joints to match GELLO-to-model convention.
+  # Adjust these if the sim arm moves in the wrong direction for any joint.
+  joint_signs: [-1, -1, -1, -1, -1, -1]
+  joint_offsets_deg: [0, 0, 0, 0, 0, 0]

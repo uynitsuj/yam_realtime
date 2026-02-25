@@ -36,6 +36,7 @@ class LaunchConfig:
     max_steps: Optional[int] = None  # this is for testing
     save_path: Optional[str] = None
     station_metadata: Dict[str, str] = field(default_factory=dict)
+    sim_mode: bool = False  # skip CAN/sensors, instantiate robots & agent in-process
 
 
 @dataclass
@@ -79,6 +80,20 @@ def main(args: Args) -> None:
                 server_procs.append(server_proc)
         main_config = instantiate(configs_dict)
 
+        # ----- Sim mode: everything runs in-process, no CAN/portal ----- #
+        if main_config.sim_mode:
+            logger.info("Running in sim mode (no CAN, no portal RPC)...")
+
+            # Robots are already instantiated by instantiate() since they
+            # were _target_ dicts in the YAML.
+            robots = main_config.robots
+            agent = instantiate(agent_cfg)
+
+            logger.info("Starting sim control loop at %.1f Hz...", main_config.hz)
+            _run_sim_control_loop(robots, agent, main_config)
+            return
+
+        # ----- Real hardware mode (original path) ----- #
         logger.info("Initializing sensors...")
         camera_dict, camera_info = initialize_sensors(sensors_cfg, server_processes)
 
@@ -112,6 +127,67 @@ def main(args: Args) -> None:
             env.close()
         if "agent" in locals():
             cleanup_processes(agent, server_processes)
+
+
+def _run_sim_control_loop(
+    robots: Dict[str, Robot],
+    agent: Agent,
+    config: LaunchConfig,
+) -> None:
+    """Simplified control loop for sim mode (no portal, no cameras).
+
+    Runs entirely in-process so the MuJoCo viewer stays on the main thread.
+    """
+    logger = logging.getLogger(__name__)
+    rate = Rate(config.hz, rate_name="sim_control_loop")
+    steps = 0
+    start_time = time.time()
+    loop_count = 0
+
+    # Build initial observation from robots
+    obs = {name: robot.get_observations() for name, robot in robots.items()}
+    obs["timestamp"] = time.time()
+
+    try:
+        while True:
+            # Check if any sim viewer has been closed
+            for robot in robots.values():
+                if hasattr(robot, "is_viewer_running") and not robot.is_viewer_running():
+                    logger.info("Viewer closed, stopping...")
+                    return
+
+            action = agent.act(obs)
+
+            # Apply actions directly
+            for name, act in action.items():
+                if name in robots:
+                    robots[name].command_joint_pos(act["pos"])
+
+            rate.sleep()
+
+            # Collect observations
+            obs = {name: robot.get_observations() for name, robot in robots.items()}
+            obs["timestamp"] = time.time()
+
+            steps += 1
+            loop_count += 1
+            elapsed_time = time.time() - start_time
+            if elapsed_time >= 1:
+                logger.info(f"Sim control loop: {loop_count / elapsed_time:.2f} Hz")
+                start_time = time.time()
+                loop_count = 0
+
+            if config.max_steps is not None and steps >= config.max_steps:
+                logger.info(f"Reached max steps ({config.max_steps}), stopping...")
+                break
+    except KeyboardInterrupt:
+        logger.info("Interrupted.")
+    finally:
+        if hasattr(agent, "close"):
+            agent.close()
+        for robot in robots.values():
+            if hasattr(robot, "close"):
+                robot.close()
 
 
 def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None:
