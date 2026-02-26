@@ -4,14 +4,13 @@ Robots Realtime is a research codebase supporting modular software stacks for re
 
 It provides extensible pythonic infrastructure for low-latency joint command streaming, agent-based policy control, visualization, and integration with inverse kinematics solvers like [pyroki](https://github.com/chungmin99/pyroki) developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
 
+Examples:
 <img src="media/yam_realtime.gif" width="500">
 <img src="media/franka_realtime2.gif" width="500">
 <img src="media/yam_active_leader.gif" width="500">
 <!-- ![yam_realtime](media/yam_realtime.gif) -->
 <!-- ![franka_realtime](media/franka_realtime.gif) -->
 <!-- ![franka_realtime2](media/franka_realtime2.gif) -->
-
-Shown is a headless-capable web-based real-time visualizer and controller for viewing commanded joint state and actual robot state, built with [Viser](https://viser.studio/main/)
 
 ## Installation
 Clone the repository and initialize submodules:
