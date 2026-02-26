@@ -4,9 +4,11 @@ Robots Realtime is a research codebase supporting modular software stacks for re
 
 It provides extensible pythonic infrastructure for low-latency joint command streaming, agent-based policy control, visualization, and integration with inverse kinematics solvers like [pyroki](https://github.com/chungmin99/pyroki) developed by [Chung-Min Kim](https://chungmin99.github.io/)! 
 
-![yam_realtime](media/yam_realtime.gif)
+<img src="media/yam_realtime.gif" width="500">
+<img src="media/franka_realtime2.gif" width="500">
+<!-- ![yam_realtime](media/yam_realtime.gif) -->
 <!-- ![franka_realtime](media/franka_realtime.gif) -->
-![franka_realtime2](media/franka_realtime2.gif)
+<!-- ![franka_realtime2](media/franka_realtime2.gif) -->
 
 Shown is a headless-capable web-based real-time visualizer and controller for viewing commanded joint state and actual robot state, built with [Viser](https://viser.studio/main/)
 
@@ -33,16 +35,16 @@ If using YAM arms, configure YAM arms CAN chain according to instructions from t
 Then run the launch entrypoint script with an appropriate robot config file.
 For Bimanual YAMS:
 ```bash
-uv run robots_realtime/envs/launch.py --config_path configs/yam_viser_bimanual.yaml
+uv run robots_realtime/envs/launch.py --config_path configs/yam/yam_viser_bimanual.yaml
 ```
 For Franka Panda (with default panda gripper):
 ```bash
 uv sync --extra sensors --extra franka_panda
-uv run robots_realtime/envs/launch.py --config_path configs/franka_viser_osc.yaml
+uv run robots_realtime/envs/launch.py --config_path configs/franka/franka_viser_osc.yaml
 ```
 or for robotiq gripper (ensure flange orientation is correct):
 ```bash
-uv run robots_realtime/envs/launch.py --config_path configs/franka_robotiq_client.yaml
+uv run robots_realtime/envs/launch.py --config_path configs/franka/franka_robotiq_client.yaml
 ```
 
 ## Extending with Custom Agents

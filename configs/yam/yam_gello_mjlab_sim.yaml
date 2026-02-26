@@ -17,11 +17,11 @@
 #   macOS – passive viewer requires mjpython:
 #     DYLD_LIBRARY_PATH=~/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/lib \
 #       .venv/bin/mjpython robots_realtime/envs/launch.py \
-#         --config-path configs/yam_gello_mjlab_sim.yaml
+#         --config-path configs/yam/yam_gello_mjlab_sim.yaml
 #
 #   Headless (render: false) – works with regular python:
 #     uv run python robots_realtime/envs/launch.py \
-#         --config-path configs/yam_gello_mjlab_sim.yaml
+#         --config-path configs/yam/yam_gello_mjlab_sim.yaml
 #
 # ── Tuning notes ─────────────────────────────────────────────────────────────
 #
