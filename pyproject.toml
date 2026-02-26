@@ -42,6 +42,9 @@ sensors = [
 franka_panda = [
     "panda_python",
 ]
+mjlab_sim = [
+    "mjlab",
+]
 
 [tool.uv.sources]
 pyroki = { path = "dependencies/pyroki", editable = true }
@@ -50,10 +53,15 @@ panda_python = { path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_pyth
 pyzed = { path = "dependencies/pyzed-5.1-cp311-cp311-linux_x86_64.whl" }
 i2rt = { path = "dependencies/i2rt", editable = true }
 lerobot_teleoperator_yamactiveleader = { path = "dependencies/lerobot_teleoperator_yamactiveleader", editable = true }
+mjlab = { path = "dependencies/mjlab", editable = true }
 
 [tool.uv]
 override-dependencies = [
     "numpy==1.26.4",
+    # mjlab requires mujoco>=3.5.0 and tyro>=1.0.1; override i2rt's hard pins.
+    # dm_control>=1.0.30 only needs mujoco>=3.3.2, so 3.5.0 is fine for all.
+    "mujoco>=3.5.0",
+    "tyro>=1.0.1",
 ]
 
 [tool.setuptools.packages.find]

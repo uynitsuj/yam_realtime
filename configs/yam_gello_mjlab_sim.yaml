@@ -1,0 +1,64 @@
+# YAM MJLab full-physics simulation driven by YAM active leader device.
+#
+# Unlike yam_gello_mujoco_sim.yaml (which does kinematics-only), this config
+# uses mjlab's ManagerBasedRlEnv to run a full physics simulation including
+# gravity, contacts, and the Lift-Cube manipulation scene.
+#
+# ── Prerequisites ────────────────────────────────────────────────────────────
+#
+#   Install the mjlab optional dependency group:
+#     uv sync --extra mjlab_sim
+#
+#   On Linux with a GPU, set device: "cuda:0" below for Warp acceleration.
+#   On macOS (arm64), device: "cpu" uses the MuJoCo-Warp CPU backend.
+#
+# ── Usage ─────────────────────────────────────────────────────────────────────
+#
+#   macOS – passive viewer requires mjpython:
+#     DYLD_LIBRARY_PATH=~/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/lib \
+#       .venv/bin/mjpython robots_realtime/envs/launch.py \
+#         --config-path configs/yam_gello_mjlab_sim.yaml
+#
+#   Headless (render: false) – works with regular python:
+#     uv run python robots_realtime/envs/launch.py \
+#         --config-path configs/yam_gello_mjlab_sim.yaml
+#
+# ── Tuning notes ─────────────────────────────────────────────────────────────
+#
+#   The action config is overridden inside MjlabSimRobot to use scale=1.0
+#   and no default offset, so leader joint angles (radians) are forwarded
+#   directly as joint-position targets to the MuJoCo PD actuator layer.
+#   If the simulated arm drifts from the leader, check that joint_signs and
+#   joint_offsets_deg match your physical setup.
+#
+#   The mjlab Lift-Cube scene places the YAM arm at a table with a small cube.
+#   If you want a different scene (e.g. Mjlab-Lift-Cube-Yam-Rgb), update
+#   task_id accordingly.
+
+_target_: robots_realtime.envs.launch.LaunchConfig
+sim_mode: true
+hz: 50.0
+
+robots:
+  yam:
+    _target_: robots_realtime.robots.mjlab_sim_robot.MjlabSimRobot
+    task_id: "Mjlab-Lift-Cube-Yam"
+    num_envs: 1
+    device: "cpu"         # Use "cuda:0" on Linux with a CUDA-capable GPU
+    render: true          # Set false for headless / non-mjpython launch
+    num_arm_dofs: 6
+    include_gripper: true
+    disable_terminations: true  # Suppress RL collision/contact resets during teleoperation
+    decimation: 4              # Uncomment to reduce physics substeps/step (default 4)
+
+agent:
+  _target_: robots_realtime.agents.teleoperation.gello_leader_agent.GelloLeaderAgent
+  port: "/dev/tty.usbmodem5AE60805531"
+  robot_name: "yam"
+  calibrate: true
+  drive_to_zero: true
+  hold_gripper: true
+  include_gripper: true
+  # Flip / offset individual joints to match leader-to-model convention.
+  joint_signs: [-1, -1, -1, -1, -1, -1]
+  joint_offsets_deg: [0, 0, 0, 0, 0, 0]
