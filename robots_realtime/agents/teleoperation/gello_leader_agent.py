@@ -116,9 +116,7 @@ class GelloLeaderAgent(Agent):
 
         if self.include_gripper:
             gripper = action["gripper.pos"]
-            # print("pre norm gripper: ", gripper)
-            gripper = (1 - ((gripper - 5) / (85 - 5)))/10
-            # print("post norm gripper: ", gripper)
+            gripper = (1 - ((gripper - 5) / (85 - 5)))/2
             pos = np.concatenate([joint_rad, [gripper]])
         else:
             pos = joint_rad

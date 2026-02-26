@@ -1,0 +1,56 @@
+# YAM MJLab simulation with position-position bilateral haptic feedback.
+#
+# The YAM active leader runs in bilateral mode:
+#   leader pos  ──►  sim follower  (normal teleoperation)
+#   leader pos  ◄──  sim follower  (haptic return path)
+#
+# The STS3215 arm motors are held at a low Torque_Limit so the leader feels
+# a gentle restoring force proportional to the mismatch between where the
+# simulated arm is and where the leader currently is.
+#
+# bilateral_kp × bilateral_torque_max = actual Torque_Limit on the motors
+# (0–1000 on STS3215).  Start low (0.1–0.3) and increase carefully.
+#
+# ── Prerequisites ─────────────────────────────────────────────────────────
+#   uv sync --extra mjlab_sim
+#
+# ── Usage ─────────────────────────────────────────────────────────────────
+#   macOS (passive viewer requires mjpython):
+#     DYLD_LIBRARY_PATH=~/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/lib \
+#       .venv/bin/mjpython robots_realtime/envs/launch.py \
+#         --config-path configs/yam_bilateral_mjlab_sim.yaml
+#
+#   Headless (render: false):
+#     uv run python robots_realtime/envs/launch.py \
+#         --config-path configs/yam_bilateral_mjlab_sim.yaml
+
+_target_: robots_realtime.envs.launch.LaunchConfig
+sim_mode: true
+hz: 50.0
+
+robots:
+  yam:
+    _target_: robots_realtime.robots.mjlab_sim_robot.MjlabSimRobot
+    task_id: "Mjlab-Lift-Cube-Yam"
+    num_envs: 1
+    device: "cpu"
+    render: true
+    num_arm_dofs: 6
+    include_gripper: true
+    disable_terminations: true
+    decimation: 4
+
+agent:
+  _target_: robots_realtime.agents.teleoperation.bilateral_leader_agent.BilateralLeaderAgent
+  port: "/dev/tty.usbmodem5AE60805531"
+  robot_name: "yam"
+  calibrate: true
+  drive_to_zero: true
+  hold_gripper: true
+  include_gripper: true
+  joint_signs: [-1, -1, -1, -1, -1, -1]
+  joint_offsets_deg: [0, 0, 0, 0, 0, 0]
+  # ── Bilateral stiffness ─────────────────────────────────────────────────
+  bilateral_kp: 0.1          # fraction of bilateral_torque_max [0.0 = off, 1.0 = full]
+  bilateral_torque_max: 100  # peak Torque_Limit on STS3215 (0–1000); 300 ≈ gentle
+  warmup_steps: 5            # skip bilateral for N steps at startup
