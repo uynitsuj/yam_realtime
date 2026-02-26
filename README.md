@@ -6,6 +6,7 @@ It provides extensible pythonic infrastructure for low-latency joint command str
 
 <img src="media/yam_realtime.gif" width="500">
 <img src="media/franka_realtime2.gif" width="500">
+<img src="media/yam_active_leader.gif" width="500">
 <!-- ![yam_realtime](media/yam_realtime.gif) -->
 <!-- ![franka_realtime](media/franka_realtime.gif) -->
 <!-- ![franka_realtime2](media/franka_realtime2.gif) -->
