@@ -1,0 +1,43 @@
+# YAM Pick Red Cube MuJoCo Simulation driven by GELLO feetech leader device
+#
+# Uses the bimanual YamEnvPickRedCube environment (full physics) with a single
+# GELLO leader controlling the right arm. The left arm stays at zero.
+#
+# Prerequisites:
+#   submodules/menagerie must contain the robot XML files:
+#     submodules/menagerie/yam_station/station_with_gate.xml
+#     submodules/menagerie/i2rt_yam/yam.xml
+#
+# Usage (macOS requires mjpython for the passive viewer):
+#   DYLD_LIBRARY_PATH=~/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/lib \
+#     .venv/bin/mjpython robots_realtime/envs/launch.py \
+#       --config-path configs/yam_gello_pick_red_cube_sim.yaml
+#
+# Or headless (render: false):
+#   uv run python robots_realtime/envs/launch.py \
+#       --config-path configs/yam_gello_pick_red_cube_sim.yaml
+
+_target_: robots_realtime.envs.launch.LaunchConfig
+sim_mode: true
+hz: 50.0
+
+robots:
+  right:
+    _target_: robots_realtime.robots.yam_pick_red_cube_sim_robot.YamPickRedCubeSimRobot
+    station_key: "SIM_YAM"
+    right_arm_only: true
+    render: true
+    randomize_scene: false
+    control_dt: 0.02
+    camera_obs: false
+
+agent:
+  _target_: robots_realtime.agents.teleoperation.gello_leader_agent.GelloLeaderAgent
+  port: "/dev/tty.usbmodem5AE60805531"
+  robot_name: "right"
+  calibrate: true
+  drive_to_zero: true
+  hold_gripper: true
+  include_gripper: true
+  joint_signs: [-1, -1, -1, -1, -1, -1]
+  joint_offsets_deg: [0, 0, 0, 0, 0, 0]

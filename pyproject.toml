@@ -33,6 +33,7 @@ dependencies = [
     "fastapi",
     "lerobot[feetech]",
     "lerobot_teleoperator_yamactiveleader",
+    "xdof_sdk",
 ]
 
 [project.optional-dependencies]
