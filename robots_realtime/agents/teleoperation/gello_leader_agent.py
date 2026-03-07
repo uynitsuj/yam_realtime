@@ -60,7 +60,7 @@ class GelloLeaderAgent(Agent):
 
     # Reasonable mock pose for DAgger debugging: slight forward reach with elbow bent.
     # Override via dagger_debug_pose_rad in the constructor or YAML config.
-    DAGGER_DEBUG_POSE_RAD: List[float] = [0.2, 0.5, 0.8, -0.7, 0.7, 0.2]
+    DAGGER_DEBUG_POSE_RAD: List[float] = [0.2, 0.7, 0.9, -0.7, 0.7, 0.2]
 
     def __init__(
         self,

@@ -1,0 +1,47 @@
+# YAM xdof-sim MuJoCo Simulation driven by GELLO feetech leader device
+#
+# Uses the xdof-sim MuJoCoYAMEnv (full bimanual physics) with a single GELLO
+# leader controlling the right arm.  The left arm stays at zeros.
+#
+# Control rate: physics_dt (0.002s) × control_decimation (17) ≈ 30 Hz.
+# Change control_decimation to 10 for ~50 Hz and update hz accordingly.
+#
+# Scene variants: "eval", "training", "hybrid" (see xdof_sim/scene_variants.py)
+#
+# Visualization uses Viser (browser-based) — no mjpython required on macOS.
+# After launch, open http://localhost:8080 in any browser to view the scene.
+#
+# Usage:
+#   uv run python robots_realtime/envs/launch.py \
+#       --config-path configs/yam/yam_gello_xdof_sim.yaml
+#
+# Headless (render: false):
+#   uv run python robots_realtime/envs/launch.py \
+#       --config-path configs/yam/yam_gello_xdof_sim.yaml
+
+_target_: robots_realtime.envs.launch.LaunchConfig
+sim_mode: true
+hz: 30.0
+
+robots:
+  right:
+    _target_: robots_realtime.robots.xdof_sim_robot.XdofSimRobot
+    right_arm_only: true
+    render: true
+    render_cameras: false
+    physics_dt: 0.002
+    control_decimation: 17
+    scene_variant: "eval"
+    viser_port: 8080
+
+agent:
+  _target_: robots_realtime.agents.teleoperation.gello_leader_agent.GelloLeaderAgent
+  port: "/dev/tty.usbmodem5AE60805531"
+  robot_name: "right"
+  calibrate: true
+  drive_to_zero: true
+  hold_gripper: true
+  include_gripper: true
+  joint_signs: [-1, -1, -1, -1, -1, -1]
+  joint_offsets_deg: [0, 0, 0, 0, 0, 0]
+  dagger_debug: true

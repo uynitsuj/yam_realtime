@@ -34,6 +34,7 @@ dependencies = [
     "lerobot[feetech]",
     "lerobot_teleoperator_yamactiveleader",
     "xdof_sdk",
+    "xdof_sim",
 ]
 
 [project.optional-dependencies]
@@ -55,6 +56,7 @@ pyzed = { path = "dependencies/pyzed-5.1-cp311-cp311-linux_x86_64.whl" }
 i2rt = { path = "dependencies/i2rt", editable = true }
 lerobot_teleoperator_yamactiveleader = { path = "dependencies/lerobot_teleoperator_yamactiveleader", editable = true }
 mjlab = { path = "dependencies/mjlab", editable = true }
+xdof_sim = { path = "dependencies/xdof-sim", editable = true }
 
 [tool.uv]
 override-dependencies = [
