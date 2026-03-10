@@ -13,6 +13,13 @@ Visualization uses Viser (browser-based), so no mjpython is required on macOS.
 Open http://localhost:8080 (or the configured port) in any browser to view.
 """
 
+import os
+
+# Must be set before `import mujoco` so the _render C extension picks up EGL
+# for headless (no-display) rendering instead of GLFW.
+os.environ.setdefault("MUJOCO_GL", "egl")
+
+from pathlib import Path
 from typing import Dict, Optional
 
 import mujoco
@@ -26,6 +33,10 @@ class _ViserSceneManager:
     Imports scene-building helpers directly from xdof_sim.examples.viser_replay
     (no modifications to the xdof-sim package required).  Only dynamic bodies
     are updated each tick; fixed geometry is uploaded once at construction time.
+
+    If camera_names is non-empty, a small MuJoCo Renderer renders each named
+    camera every tick and streams the result as a live GUI image panel in the
+    Viser sidebar (JPEG, camera_render_size × camera_render_size pixels).
     """
 
     def __init__(
@@ -34,6 +45,8 @@ class _ViserSceneManager:
         data: mujoco.MjData,
         port: int = 8080,
         visible_geom_groups: tuple[int, ...] = (0, 1, 2),
+        record_camera_size: int = 480,
+        viser_preview_size: int = 244,
     ) -> None:
         import viser
         import viser.transforms as vtf
@@ -52,6 +65,44 @@ class _ViserSceneManager:
 
         self.server = viser.ViserServer(port=port)
         print(f"Viser scene viewer: http://localhost:{port}")
+
+        # --- Camera image panels ------------------------------------------
+        # Auto-detect all cameras present in the model.
+        self._cam_names: list[str] = [
+            mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_CAMERA, i)
+            for i in range(model.ncam)
+        ]
+
+        self._cam_renderer: Optional[mujoco.Renderer] = None
+        self._cam_handles: dict[str, viser.GuiImageHandle] = {}
+        self._last_images: dict[str, np.ndarray] = {}  # for data logging
+        self._viser_preview_size = viser_preview_size
+        if self._cam_names:
+            self._cam_renderer = mujoco.Renderer(
+                model,
+                height=record_camera_size,
+                width=record_camera_size,
+            )
+            placeholder = np.zeros(
+                (viser_preview_size, viser_preview_size, 3), dtype=np.uint8
+            )
+            with self.server.gui.add_folder("Wrist Cameras"):
+                for name in self._cam_names:
+                    self._cam_handles[name] = self.server.gui.add_image(
+                        placeholder,
+                        label=f"{name} wrist",
+                        format="jpeg",
+                        jpeg_quality=80,
+                    )
+            print(f"  Camera feeds: {self._cam_names} — record {record_camera_size}px, preview {viser_preview_size}px")
+
+        # --- Reset button ----------------------------------------------------
+        self._reset_requested = False
+        reset_btn = self.server.gui.add_button("Reset Environment", color="red")
+
+        @reset_btn.on_click
+        def _(_) -> None:
+            self._reset_requested = True
 
         # Classify visual geoms by body
         body_visual: dict[int, list[int]] = {}
@@ -113,6 +164,26 @@ class _ViserSceneManager:
                 handle.wxyz = vtf.SO3.from_matrix(xmat).wxyz
             self.server.flush()
 
+        # Render and stream wrist camera images (done outside the atomic block
+        # to avoid holding the lock during the relatively expensive render).
+        if self._cam_renderer is not None:
+            for name in self._cam_names:
+                self._cam_renderer.update_scene(self._data, camera=name)
+                rgb = self._cam_renderer.render()  # (H, W, 3) uint8 at record_camera_size
+                self._last_images[name] = rgb
+                # Downscale for the viser sidebar preview if sizes differ.
+                p = self._viser_preview_size
+                if rgb.shape[0] != p:
+                    import cv2
+                    preview = cv2.resize(rgb, (p, p), interpolation=cv2.INTER_LINEAR)
+                else:
+                    preview = rgb
+                self._cam_handles[name].image = preview
+
+    def get_camera_images(self) -> dict[str, np.ndarray]:
+        """Return the most recently rendered camera images (copies)."""
+        return {k: v.copy() for k, v in self._last_images.items()}
+
     def stop(self) -> None:
         self.server.stop()
 
@@ -138,7 +209,7 @@ class XdofSimRobot(Robot):
             arm stays at zeros.  Register this robot under the "right" key.
         render: Launch the Viser web viewer.
         render_cameras: Whether to render MuJoCo camera observations each
-            step.  Expensive; disable for teleoperation.
+            step for policy observations.  Expensive; disable for teleoperation.
         physics_dt: MuJoCo physics timestep in seconds.
         control_decimation: Number of physics steps per control step.
             Effective control rate = 1 / (physics_dt x control_decimation).
@@ -151,6 +222,8 @@ class XdofSimRobot(Robot):
             One of "eval", "training", "hybrid".  None leaves the default
             scene as-is.
         viser_port: Port for the Viser web server.
+        viser_camera_size: Resolution (pixels, square) for the streamed
+            camera images.  Smaller values reduce websocket bandwidth.
     """
 
     def __init__(
@@ -163,6 +236,8 @@ class XdofSimRobot(Robot):
         task: Optional[str] = "bottle_pickup",
         scene_variant: Optional[str] = None,
         viser_port: int = 8080,
+        viser_preview_size: int = 244,
+        record_camera_size: int = 864,
     ) -> None:
         from xdof_sim.config import get_i2rt_sim_config
         from xdof_sim.env import MuJoCoYAMEnv
@@ -191,6 +266,8 @@ class XdofSimRobot(Robot):
                 model=self._env.model,
                 data=self._env.data,
                 port=viser_port,
+                record_camera_size=record_camera_size,
+                viser_preview_size=viser_preview_size,
             )
             # Push initial pose before the control loop starts
             self._viser.update()
@@ -234,12 +311,31 @@ class XdofSimRobot(Robot):
             return {"joint_pos": state[self._per_arm_dofs:].copy()}
         return {"joint_pos": state.copy()}
 
+    def get_camera_images(self) -> Dict[str, np.ndarray]:
+        """Return the most recently rendered wrist camera images, or {} if none."""
+        if self._viser is not None:
+            return self._viser.get_camera_images()
+        return {}
+
     # ------------------------------------------------------------------ #
     # Viewer helpers
     # ------------------------------------------------------------------ #
 
     def is_viewer_running(self) -> bool:
         # Viser runs as a background server — always alive until close() is called.
+        return True
+
+    def consume_reset_request(self) -> bool:
+        """Return True (and reset the sim) if the viser Reset button was pressed.
+
+        Resets MuJoCo state and refreshes the viser scene.  Clears the flag so
+        it returns False on every subsequent call until the button is pressed again.
+        """
+        if self._viser is None or not self._viser._reset_requested:
+            return False
+        self._viser._reset_requested = False
+        self._env.reset()
+        self._viser.update()
         return True
 
     def close(self) -> None:

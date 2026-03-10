@@ -6,6 +6,7 @@ class from the lerobot plugin.
 """
 
 import logging
+from collections import deque
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -31,6 +32,12 @@ class GelloLeaderAgent(Agent):
     Reads the leader's joint positions (in degrees) and converts them
     to radians for output as follower joint-position commands.
 
+    ``act()`` always returns ``{robot_name: {"pos": ...}}``.  When
+    ``record_on_intervention=True`` it additionally emits ``{"_record": bool}``
+    so the control loop can drive a :class:`TrajectoryLogger` without any
+    external trigger — recording starts automatically when the human pushes
+    against the DAgger hold and stops when they release.
+
     Args:
         port: Serial port for the feetech bus
             (e.g. ``/dev/tty.usbmodem5AE60805531``).
@@ -54,6 +61,10 @@ class GelloLeaderAgent(Agent):
         include_gripper: If True, include the gripper value as a 7th
             element in the action output.  Set to False for sim models
             that have no gripper joint.  Defaults to False.
+        record_on_intervention: Emit ``_record=True`` whenever the
+            DAgger intervention sensor is active (human pushing against
+            the held pose).  Useful for automatically labelling
+            corrective demonstrations without any external trigger.
     """
 
     use_joint_state_as_action: bool = False
@@ -75,6 +86,7 @@ class GelloLeaderAgent(Agent):
         include_gripper: bool = False,
         dagger_debug: bool = False,
         dagger_debug_pose_rad: Optional[List[float]] = False,
+        record_on_intervention: bool = False,
     ) -> None:
         self.robot_name = robot_name
         self.joint_signs = np.array(joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
@@ -82,6 +94,7 @@ class GelloLeaderAgent(Agent):
             joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64
         )
         self.include_gripper = include_gripper
+        self.record_on_intervention = record_on_intervention
         self._held_action: Optional[Dict[str, Any]] = None
 
         config = YamActiveLeaderTeleoperatorConfig(port=port, use_degrees=use_degrees)
@@ -92,6 +105,7 @@ class GelloLeaderAgent(Agent):
         # ---- Active motor control at startup ---- #
         if drive_to_zero:
             self.teleop.drive_to_zero()
+            self.teleop.start_arm_hold()
 
         if hold_gripper:
             self.teleop.start_gripper_spring()
@@ -174,7 +188,10 @@ class GelloLeaderAgent(Agent):
         else:
             pos = joint_rad
 
-        return {self.robot_name: {"pos": pos.astype(np.float32)}}
+        out: Dict[str, Any] = {self.robot_name: {"pos": pos.astype(np.float32)}}
+        if self.record_on_intervention:
+            out["_record"] = bool(self.teleop.is_arm_hold_intervening)
+        return out
 
     def action_spec(self) -> Dict[str, Dict[str, Array]]:
         n = NUM_ARM_JOINTS + (1 if self.include_gripper else 0)
@@ -200,6 +217,12 @@ class BimanualGelloLeaderAgent(Agent):
     robot key.  This matches the layout expected by
     ``XdofSimRobot`` when ``right_arm_only=False``.
 
+    Recording signal — ``act()`` emits ``{"_record": bool}`` alongside the
+    action when ``record_on_intervention=True`` (either arm hold-current
+    intervening) or ``record_on_gripper_squeeze=True`` (both grippers
+    squeezed past ``gripper_squeeze_threshold``; fully open ≈ 85°, closed ≈ 5°).
+    Intervention takes precedence if both flags are set.
+
     Args:
         left_port: Serial port for the left-arm feetech bus.
         right_port: Serial port for the right-arm feetech bus.
@@ -215,6 +238,27 @@ class BimanualGelloLeaderAgent(Agent):
         hold_gripper: Keep gripper torque enabled on both arms.
         include_gripper: Include the gripper value (7th element per arm).
             Defaults to True for bimanual.
+        record_on_intervention: Emit ``_record=True`` whenever either arm's
+            hold-current sensor detects an intervention (OR semantics).
+            Default False.
+        hold_delta_threshold: Raw current delta above baseline required to
+            trigger intervention detection.  Lower = more sensitive.
+            Default 5.0 (library default is 8.0, which is too conservative
+            for arms at rest with 0 baseline current).
+        hold_filter_alpha: EMA smoothing factor for live current readings.
+            Higher = faster response, more noise.  Default 0.3.
+            (Library default is 0.1, which is too slow.)
+        record_on_gripper_squeeze: Emit ``_record=True`` while both grippers
+            are simultaneously squeezed.  Default False.
+        gripper_squeeze_threshold: Raw gripper position (degrees) below which
+            a gripper is considered "squeezed".  Default 60.0.
+        auto_stop_on_static: Override ``_record`` to False when arm joint
+            positions have been essentially static (operator let go) for
+            ``static_frames`` consecutive ticks.  Works with any trigger.
+        static_threshold_rad: Max per-joint delta (rad) per tick below which a
+            frame is considered static.  Default 0.003 rad (~0.17°).
+        static_frames: Consecutive static ticks required before auto-stop.
+            At 30 Hz, 60 frames ≈ 2 s.
     """
 
     def __init__(
@@ -233,12 +277,30 @@ class BimanualGelloLeaderAgent(Agent):
         drive_to_zero: bool = True,
         hold_gripper: bool = True,
         include_gripper: bool = True,
+        record_on_intervention: bool = False,
+        hold_delta_threshold: float = 5.0,
+        hold_filter_alpha: float = 0.3,
+        record_on_gripper_squeeze: bool = False,
+        gripper_squeeze_threshold: float = 60.0,
+        auto_stop_on_static: bool = False,
+        static_threshold_rad: float = 0.003,
+        static_frames: int = 60,
     ) -> None:
         self.left_id = left_id
         self.right_id = right_id
 
         self.robot_name = robot_name
         self.include_gripper = include_gripper
+        self.record_on_intervention = record_on_intervention
+        self._hold_delta_threshold = hold_delta_threshold
+        self._hold_filter_alpha = hold_filter_alpha
+        self.record_on_gripper_squeeze = record_on_gripper_squeeze
+        self.gripper_squeeze_threshold = gripper_squeeze_threshold
+        self.auto_stop_on_static = auto_stop_on_static
+        self.static_threshold_rad = static_threshold_rad
+        self._static_window: deque = deque(maxlen=static_frames)
+        self._last_joint_pos: Optional[np.ndarray] = None
+        self._recording_locked = False  # set after auto-stop; cleared by reset()
 
         self.left_joint_signs = np.array(left_joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
         self.right_joint_signs = np.array(right_joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
@@ -262,6 +324,21 @@ class BimanualGelloLeaderAgent(Agent):
         if drive_to_zero:
             self.left_teleop.drive_to_zero()
             self.right_teleop.drive_to_zero()
+            if record_on_intervention:
+                # drive_to_zero() releases arm torque at the end so the operator
+                # can move freely.  start_arm_hold() needs torque active to sense
+                # current — re-enable it by holding the zero config in place.
+                _zero = {f"joint_{i}": 0.0 for i in range(1, NUM_ARM_JOINTS + 1)}
+                self.left_teleop.drive_to_config(_zero, settle_time=0.0)
+                self.right_teleop.drive_to_config(_zero, settle_time=0.0)
+            self.left_teleop.start_arm_hold(
+                delta_threshold=hold_delta_threshold,
+                filter_alpha=hold_filter_alpha,
+            )
+            self.right_teleop.start_arm_hold(
+                delta_threshold=hold_delta_threshold,
+                filter_alpha=hold_filter_alpha,
+            )
 
         if hold_gripper:
             self.left_teleop.start_gripper_spring()
@@ -271,19 +348,18 @@ class BimanualGelloLeaderAgent(Agent):
     # Internal helpers
     # ------------------------------------------------------------------ #
 
-    def _read_arm(
+    def _build_pos(
         self,
-        teleop: YamActiveLeaderTeleoperator,
+        raw: Dict[str, Any],
         signs: np.ndarray,
         offsets_deg: np.ndarray,
     ) -> np.ndarray:
-        """Read one arm and return joint_rad [+ gripper] as a 1-D array."""
-        action = teleop.get_action()
-        joint_deg = np.array([action[f"joint_{i}.pos"] for i in range(1, NUM_ARM_JOINTS + 1)])
+        """Convert a raw teleop action dict to joint_rad [+ gripper]."""
+        joint_deg = np.array([raw[f"joint_{i}.pos"] for i in range(1, NUM_ARM_JOINTS + 1)])
         joint_deg = signs * joint_deg + offsets_deg
         joint_rad = np.deg2rad(joint_deg)
         if self.include_gripper:
-            return np.concatenate([joint_rad, [action["gripper.pos"]]])
+            return np.concatenate([joint_rad, [raw["gripper.pos"]]])
         return joint_rad
 
     # ------------------------------------------------------------------ #
@@ -298,10 +374,75 @@ class BimanualGelloLeaderAgent(Agent):
         Returns:
             ``{robot_name: {"pos": np.ndarray}}``
         """
-        left_pos = self._read_arm(self.left_teleop, self.left_joint_signs, self.left_joint_offsets_deg)
-        right_pos = self._read_arm(self.right_teleop, self.right_joint_signs, self.right_joint_offsets_deg)
+        # Pump arm hold state so is_arm_hold_intervening is current.
+        # If either arm detects intervention, cross-release the other arm too
+        # so both arms are free to move simultaneously.
+        left_fired = self.left_teleop.is_arm_hold_active and self.left_teleop.update_arm_hold()
+        right_fired = self.right_teleop.is_arm_hold_active and self.right_teleop.update_arm_hold()
+        if left_fired and self.right_teleop.is_arm_hold_active:
+            self.right_teleop.clear_arm_hold()
+            self.right_teleop.bus.disable_torque(self.right_teleop.ARM_MOTORS)
+            logger.info("Left arm intervened — releasing right arm hold torque.")
+        if right_fired and self.left_teleop.is_arm_hold_active:
+            self.left_teleop.clear_arm_hold()
+            self.left_teleop.bus.disable_torque(self.left_teleop.ARM_MOTORS)
+            logger.info("Right arm intervened — releasing left arm hold torque.")
+
+        logger.debug(
+            "Arm hold — left: active=%s intervening=%s | right: active=%s intervening=%s",
+            self.left_teleop.is_arm_hold_active,
+            self.left_teleop.is_arm_hold_intervening,
+            self.right_teleop.is_arm_hold_active,
+            self.right_teleop.is_arm_hold_intervening,
+        )
+
+        left_raw = self.left_teleop.get_action()
+        right_raw = self.right_teleop.get_action()
+
+        left_pos = self._build_pos(left_raw, self.left_joint_signs, self.left_joint_offsets_deg)
+        right_pos = self._build_pos(right_raw, self.right_joint_signs, self.right_joint_offsets_deg)
         combined = np.concatenate([left_pos, right_pos]).astype(np.float32)
-        return {self.robot_name: {"pos": combined}}
+
+        out: Dict[str, Any] = {self.robot_name: {"pos": combined}}
+
+        if not self._recording_locked:
+            if self.record_on_intervention:
+                out["_record"] = (
+                    bool(self.left_teleop.is_arm_hold_intervening)
+                    or bool(self.right_teleop.is_arm_hold_intervening)
+                )
+
+            if self.record_on_gripper_squeeze:
+                left_grip = left_raw.get("gripper.pos", 85.0)
+                right_grip = right_raw.get("gripper.pos", 85.0)
+                out["_record"] = (
+                    left_grip < self.gripper_squeeze_threshold
+                    and right_grip < self.gripper_squeeze_threshold
+                )
+
+        if self.auto_stop_on_static and out.get("_record", False):
+            # Only track static frames while actively recording — avoids firing
+            # at startup when the arms are idle and haven't been touched yet.
+            joints = combined[:NUM_ARM_JOINTS * 2]
+            if self._last_joint_pos is not None:
+                delta = float(np.max(np.abs(joints - self._last_joint_pos)))
+                self._static_window.append(delta < self.static_threshold_rad)
+                if (
+                    len(self._static_window) == self._static_window.maxlen
+                    and all(self._static_window)
+                ):
+                    out["_record"] = False
+                    self._static_window.clear()
+                    self._recording_locked = True
+                    logger.info("Auto-stop triggered — recording locked until reset.")
+            self._last_joint_pos = joints.copy()
+        elif self.auto_stop_on_static:
+            # Not recording — keep window and last_pos fresh so the first
+            # static check after recording starts has a valid reference.
+            self._static_window.clear()
+            self._last_joint_pos = combined[:NUM_ARM_JOINTS * 2].copy()
+
+        return out
 
     def action_spec(self) -> Dict[str, Dict[str, Array]]:
         n_per_arm = NUM_ARM_JOINTS + (1 if self.include_gripper else 0)
@@ -317,4 +458,7 @@ class BimanualGelloLeaderAgent(Agent):
         logger.info("BimanualGelloLeaderAgent disconnected.")
 
     def reset(self) -> None:
-        pass
+        self._recording_locked = False
+        self._static_window.clear()
+        self._last_joint_pos = None
+        logger.info("BimanualGelloLeaderAgent reset — recording re-armed.")

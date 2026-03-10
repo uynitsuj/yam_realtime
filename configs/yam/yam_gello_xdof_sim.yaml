@@ -28,9 +28,11 @@ robots:
     render_cameras: false
     physics_dt: 0.002
     control_decimation: 17
-    # task: "baking_prep"
+    task: "breakfast_setup"
     scene_variant: "eval"
     viser_port: 8080
+    viser_preview_size: 244   # sidebar preview resolution (lower = less websocket bandwidth)
+    record_camera_size: 480   # logged video resolution (independent of preview)
 
 agent:
   _target_: robots_realtime.agents.teleoperation.gello_leader_agent.BimanualGelloLeaderAgent
@@ -47,3 +49,8 @@ agent:
   right_joint_signs: [-1, -1, -1, -1, -1, -1]
   left_joint_offsets_deg: [0, 0, 0, 0, 0, 0]
   right_joint_offsets_deg: [0, 0, 0, 0, 0, 0]
+  record_on_intervention: true
+  auto_stop_on_static: true
+
+
+record_path: "../data/trajectories"
