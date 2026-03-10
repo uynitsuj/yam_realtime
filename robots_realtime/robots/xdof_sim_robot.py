@@ -19,7 +19,6 @@ import os
 # for headless (no-display) rendering instead of GLFW.
 os.environ.setdefault("MUJOCO_GL", "egl")
 
-from pathlib import Path
 from typing import Dict, Optional
 
 import mujoco
@@ -50,12 +49,11 @@ class _ViserSceneManager:
     ) -> None:
         import viser
         import viser.transforms as vtf
-        from mujoco import mjtGeom, mjtObj
-        from mujoco import mj_id2name
+        from mujoco import mj_id2name, mjtGeom, mjtObj
         from xdof_sim.examples.viser_replay import (
-            _merge_geoms,
-            _is_fixed_body,
             _get_body_name,
+            _is_fixed_body,
+            _merge_geoms,
         )
 
         self._model = model
@@ -69,8 +67,7 @@ class _ViserSceneManager:
         # --- Camera image panels ------------------------------------------
         # Auto-detect all cameras present in the model.
         self._cam_names: list[str] = [
-            mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_CAMERA, i)
-            for i in range(model.ncam)
+            mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_CAMERA, i) for i in range(model.ncam)
         ]
 
         self._cam_renderer: Optional[mujoco.Renderer] = None
@@ -83,9 +80,7 @@ class _ViserSceneManager:
                 height=record_camera_size,
                 width=record_camera_size,
             )
-            placeholder = np.zeros(
-                (viser_preview_size, viser_preview_size, 3), dtype=np.uint8
-            )
+            placeholder = np.zeros((viser_preview_size, viser_preview_size, 3), dtype=np.uint8)
             with self.server.gui.add_folder("Wrist Cameras"):
                 for name in self._cam_names:
                     self._cam_handles[name] = self.server.gui.add_image(
@@ -144,15 +139,14 @@ class _ViserSceneManager:
                         position=model.body(body_id).pos,
                         wxyz=model.body(body_id).quat,
                     )
-            else:
-                if visual_ids:
-                    merged = _merge_geoms(model, visual_ids)
-                    handle = self.server.scene.add_mesh_trimesh(
-                        f"/bodies/{body_name}",
-                        merged,
-                        visible=True,
-                    )
-                    self._mesh_handles[body_id] = handle
+            elif visual_ids:
+                merged = _merge_geoms(model, visual_ids)
+                handle = self.server.scene.add_mesh_trimesh(
+                    f"/bodies/{body_name}",
+                    merged,
+                    visible=True,
+                )
+                self._mesh_handles[body_id] = handle
 
     def update(self) -> None:
         """Push current body poses from MjData to the viser scene."""
@@ -175,6 +169,7 @@ class _ViserSceneManager:
                 p = self._viser_preview_size
                 if rgb.shape[0] != p:
                     import cv2
+
                     preview = cv2.resize(rgb, (p, p), interpolation=cv2.INTER_LINEAR)
                 else:
                     preview = rgb
@@ -256,6 +251,7 @@ class XdofSimRobot(Robot):
 
         if scene_variant is not None:
             from xdof_sim.scene_variants import apply_scene_variant
+
             apply_scene_variant(self._env.model, scene_variant)
 
         self._env.reset()
@@ -282,7 +278,7 @@ class XdofSimRobot(Robot):
     def get_joint_pos(self) -> np.ndarray:
         state = self._env.get_obs()["state"]  # 14D: [left_7, right_7]
         if self._right_arm_only:
-            return state[self._per_arm_dofs:].copy()
+            return state[self._per_arm_dofs :].copy()
         return state.copy()
 
     def command_joint_pos(self, joint_pos: np.ndarray) -> None:
@@ -308,7 +304,7 @@ class XdofSimRobot(Robot):
     def get_observations(self) -> Dict[str, np.ndarray]:
         state = self._env.get_obs()["state"]  # 14D
         if self._right_arm_only:
-            return {"joint_pos": state[self._per_arm_dofs:].copy()}
+            return {"joint_pos": state[self._per_arm_dofs :].copy()}
         return {"joint_pos": state.copy()}
 
     def get_camera_images(self) -> Dict[str, np.ndarray]:

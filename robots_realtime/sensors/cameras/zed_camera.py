@@ -213,7 +213,7 @@ class ZedCamera(CameraDriver):
                         images={"left_rgb": left_rgb},
                         timestamp=ts_image - self.image_transfer_time_offset_ms,
                     )
-                
+
             if self.enable_depth:
                 self.zed.retrieve_measure(self.depth_map, sl.MEASURE.DEPTH)
                 depth_map_data = self.depth_map.get_data()

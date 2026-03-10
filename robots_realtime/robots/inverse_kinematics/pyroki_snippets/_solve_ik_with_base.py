@@ -41,9 +41,7 @@ def solve_ik_with_base(
     assert prev_cfg.shape == (robot.joints.num_actuated_joints,)
     target_link_idx = robot.links.names.index(target_link_name)
 
-    T_world_targets = jaxlie.SE3(
-        jnp.concatenate([jnp.array(target_wxyz), jnp.array(target_position)], axis=-1)
-    )
+    T_world_targets = jaxlie.SE3(jnp.concatenate([jnp.array(target_wxyz), jnp.array(target_position)], axis=-1))
     base_pose, cfg = _solve_ik_jax(
         robot,
         T_world_targets,
@@ -125,9 +123,7 @@ def _solve_ik_jax(
         jaxls.LeastSquaresProblem(costs=costs, variables=variables)
         .analyze()
         .solve(
-            initial_vals=jaxls.VarValues.make(
-                [joint_var.with_value(prev_cfg), base_var]
-            ),
+            initial_vals=jaxls.VarValues.make([joint_var.with_value(prev_cfg), base_var]),
             verbose=False,
         )
     )

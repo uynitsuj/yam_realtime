@@ -5,9 +5,9 @@ from pydantic import (
     BaseModel,
     ConfigDict,
 )
+from xdof_sdk.data.schema.types import Transform3D
 
 from robots_realtime import ROOT_PATH
-from xdof_sdk.data.schema.types import Transform3D
 
 # Path constants for robot assets
 MENAGERIE_ROOT = ROOT_PATH / "robots_realtime/mujoco/assets"

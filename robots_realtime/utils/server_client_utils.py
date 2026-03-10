@@ -1,22 +1,26 @@
 import asyncio
-import numpy as np
-import msgpack
-import msgpack_numpy as m
 import struct
 
+import msgpack
+import msgpack_numpy as m
+
 m.patch()  # allow numpy arrays
+
 
 def encode_msg(obj: dict) -> bytes:
     return msgpack.packb(obj, use_bin_type=True)
 
+
 def decode_msg(raw: bytes) -> dict:
     return msgpack.unpackb(raw, raw=True)
+
 
 async def send_framed(writer, obj: dict):
     payload = encode_msg(obj)
     header = struct.pack("!I", len(payload))
     writer.write(header + payload)
     await writer.drain()
+
 
 async def recv_framed(reader):
     header = await reader.readexactly(4)
@@ -64,6 +68,7 @@ class MsgpackNumpyServer:
                 out[k] = v
         return out
 
+
 class MsgpackNumpyClient:
     def __init__(self, host="0.0.0.0", port=9000):
         self.host = host
@@ -86,6 +91,7 @@ class MsgpackNumpyClient:
         if self.writer:
             self.writer.close()
             await self.writer.wait_closed()
+
 
 class SyncMsgpackNumpyClient:
     def __init__(self, host="0.0.0.0", port=9000):

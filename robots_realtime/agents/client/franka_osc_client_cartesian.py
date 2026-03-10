@@ -16,9 +16,10 @@ from dm_env.specs import Array
 from robots_realtime.agents.agent import Agent
 from robots_realtime.robots.inverse_kinematics.franka_pyroki import FrankaPyroki
 from robots_realtime.sensors.cameras.camera_utils import obs_get_rgb, resize_with_center_crop
-from robots_realtime.utils.portal_utils import remote
 from robots_realtime.utils.depth_utils import depth_color_to_pointcloud
+from robots_realtime.utils.portal_utils import remote
 from robots_realtime.utils.server_client_utils import SyncMsgpackNumpyClient
+
 
 class FrankaOscClientCartesianAgent(Agent):
     """Interactive teleoperation agent for Franka OSC robots.
@@ -64,7 +65,9 @@ class FrankaOscClientCartesianAgent(Agent):
         self.ik_thread.start()
 
         if self.robotiq_gripper:
-            self.ik.transform_handles.get("left").tcp_offset_frame.wxyz = vtf.SO3.from_rpy_radians(0.0, 0.0, np.pi/4).wxyz
+            self.ik.transform_handles.get("left").tcp_offset_frame.wxyz = vtf.SO3.from_rpy_radians(
+                0.0, 0.0, np.pi / 4
+            ).wxyz
             self.ik.transform_handles.get("left").tcp_offset_frame.position = (0.0, 0.0, -0.157)
 
         self.franka_client = SyncMsgpackNumpyClient(host="0.0.0.0", port=9000)
@@ -142,14 +145,13 @@ class FrankaOscClientCartesianAgent(Agent):
             self.left_gripper_slider_handle = self.viser_server.gui.add_slider(
                 label="Gripper Width", min=0.0, max=1.0, step=0.005, initial_value=1.0
             )
-            
+
         if self.bimanual:
             self.right_gripper_slider_handle = self.viser_server.gui.add_slider(
                 label="Gripper Width (R)", min=0.0, max=0.1, step=0.001, initial_value=0.1
             )
-        
+
         self.camera_frustum_handles: Dict[str, viser.CameraFrustumHandle] = {}
-        
 
     def _update_visualization(self) -> None:
         """Continuously sync live robot state and camera frames into Viser."""
@@ -168,7 +170,9 @@ class FrankaOscClientCartesianAgent(Agent):
                 self.urdf_vis_left_real.update_cfg(left_joint_pos)
 
             if self.hyrl_joint_pos is not None:
-                self.urdf_vis_left_hyrl.update_cfg(np.concatenate([self.hyrl_joint_pos, [self.hyrl_gripper_pos*0.08]]))
+                self.urdf_vis_left_hyrl.update_cfg(
+                    np.concatenate([self.hyrl_joint_pos, [self.hyrl_gripper_pos * 0.08]])
+                )
 
             if self.bimanual:
                 right_joint_pos = self._extract_joint_pos(obs_copy, "right")
@@ -179,18 +183,20 @@ class FrankaOscClientCartesianAgent(Agent):
             if rgb_images:
                 for key, image in rgb_images.items():
                     if key not in self.viser_cam_img_handles:
-                        self.viser_cam_img_handles[key] = self.viser_server.gui.add_image(resize_with_center_crop(image, 224, 224), label=key)
+                        self.viser_cam_img_handles[key] = self.viser_server.gui.add_image(
+                            resize_with_center_crop(image, 224, 224), label=key
+                        )
                     if self.visualize_rgbd:
                         self.viser_cam_img_handles[key].image = resize_with_center_crop(image, 224, 224)
 
                     if key not in self.camera_frustum_handles:
                         self.camera_frustum_handles[key] = self.viser_server.scene.add_camera_frustum(
-                            name = f"camera_frustum_{key}",
-                            fov = 1.2,
-                            aspect = 1.0,
-                            scale = 0.05,
-                            cast_shadow = False,
-                            receive_shadow = False,
+                            name=f"camera_frustum_{key}",
+                            fov=1.2,
+                            aspect=1.0,
+                            scale=0.05,
+                            cast_shadow=False,
+                            receive_shadow=False,
                         )
                     if self.visualize_rgbd:
                         self.camera_frustum_handles[key].image = resize_with_center_crop(image, 224, 224)
@@ -199,19 +205,28 @@ class FrankaOscClientCartesianAgent(Agent):
 
                     self.camera_frustum_handles[key].position = (1.009, 0, 0.29)
 
-                    self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
+                    self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(
+                        np.pi / 2 - np.pi / 6, np.pi, -np.pi / 2
+                    ).wxyz
 
                     if "depth_data" in obs_copy[key] and self.visualize_rgbd:
                         depth_data = obs_copy[key]["depth_data"]
                         points, colors = depth_color_to_pointcloud(
-                            depth = depth_data,
-                            rgb_img = image,
-                            intrinsics = obs_copy[key]["intrinsics"]["left"]["intrinsics_matrix"], # We assume we're taking left camera image from a stereo pair
-                            subsample_factor = 4,
-                            depth_clip_range = (0.015, 1.2),
+                            depth=depth_data,
+                            rgb_img=image,
+                            intrinsics=obs_copy[key]["intrinsics"]["left"][
+                                "intrinsics_matrix"
+                            ],  # We assume we're taking left camera image from a stereo pair
+                            subsample_factor=4,
+                            depth_clip_range=(0.015, 1.2),
                         )
-                        self.viser_server.scene.add_point_cloud(name = f"camera_frustum_{key}/point_cloud_{key}", points = points, colors = colors, point_size = 0.002)
-                
+                        self.viser_server.scene.add_point_cloud(
+                            name=f"camera_frustum_{key}/point_cloud_{key}",
+                            points=points,
+                            colors=colors,
+                            point_size=0.002,
+                        )
+
                 time.sleep(self._update_period)
 
     # ------------------------------------------------------------------
@@ -221,26 +236,32 @@ class FrankaOscClientCartesianAgent(Agent):
         self.obs = deepcopy(obs)
 
         # For now camera extrinsics are hardcoded, TODO: Should attach extrinsics files to sensor class obj and pass extr to obs
-        self.obs["top_camera"]["pose"] = np.concatenate([np.array([1.009, 0, 0.29]), vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz])
-        self.obs["top_camera"]["pose_mat"] = vtf.SE3(wxyz_xyz=np.concatenate([self.obs["top_camera"]["pose"][3:], self.obs["top_camera"]["pose"][:3]])).as_matrix()
+        self.obs["top_camera"]["pose"] = np.concatenate(
+            [np.array([1.009, 0, 0.29]), vtf.SO3.from_rpy_radians(np.pi / 2 - np.pi / 6, np.pi, -np.pi / 2).wxyz]
+        )
+        self.obs["top_camera"]["pose_mat"] = vtf.SE3(
+            wxyz_xyz=np.concatenate([self.obs["top_camera"]["pose"][3:], self.obs["top_camera"]["pose"][:3]])
+        ).as_matrix()
         # self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
         response = self.franka_client.send_request(self.obs)
 
-        if response.get(b'left') is not None:
-            self.hyrl_joint_pos = np.asarray(response.get(b'left').get(b'joint_pos'), dtype=np.float32)
-            self.hyrl_gripper_pos = np.asarray(response.get(b'left').get(b'gripper'), dtype=np.float32)
+        if response.get(b"left") is not None:
+            self.hyrl_joint_pos = np.asarray(response.get(b"left").get(b"joint_pos"), dtype=np.float32)
+            self.hyrl_gripper_pos = np.asarray(response.get(b"left").get(b"gripper"), dtype=np.float32)
         print(response)
 
         left_target = np.asarray(self.ik.joints["left"], dtype=np.float32)
         left_target[-1] = self.left_gripper_slider_handle.value
         action: Dict[str, Dict[str, np.ndarray]] = {"left": {"pos": left_target}}
 
-        if response.get(b'left') is not None:
+        if response.get(b"left") is not None:
             if not self.robotiq_gripper:
-                gripper_act = self.hyrl_gripper_pos*0.08
+                gripper_act = self.hyrl_gripper_pos * 0.08
             else:
                 gripper_act = self.hyrl_gripper_pos
-            action: Dict[str, Dict[str, np.ndarray]] = {"left": {"pos": np.concatenate([self.hyrl_joint_pos, [gripper_act]])}}
+            action: Dict[str, Dict[str, np.ndarray]] = {
+                "left": {"pos": np.concatenate([self.hyrl_joint_pos, [gripper_act]])}
+            }
 
         if self.bimanual:
             assert "right" in self.ik.joints, "bimanual mode requires both IK solutions"

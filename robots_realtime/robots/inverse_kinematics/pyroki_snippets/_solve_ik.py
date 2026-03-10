@@ -54,9 +54,7 @@ def _solve_ik_jax(
         pk.costs.pose_cost_analytic_jac(
             robot,
             joint_var,
-            jaxlie.SE3.from_rotation_and_translation(
-                jaxlie.SO3(target_wxyz), target_position
-            ),
+            jaxlie.SE3.from_rotation_and_translation(jaxlie.SO3(target_wxyz), target_position),
             target_link_index,
             pos_weight=50.0,
             ori_weight=10.0,

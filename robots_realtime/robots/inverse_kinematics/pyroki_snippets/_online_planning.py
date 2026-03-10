@@ -26,9 +26,7 @@ def solve_online_planning(
     assert target_position.shape == (3,) and target_wxyz.shape == (4,)
     target_link_indices = [robot.links.names.index(target_link_name)]
 
-    target_poses = jaxlie.SE3(
-        jnp.concatenate([jnp.array(target_wxyz), jnp.array(target_position)], axis=-1)
-    )
+    target_poses = jaxlie.SE3(jnp.concatenate([jnp.array(target_wxyz), jnp.array(target_position)], axis=-1))
     target_links = jnp.array(target_link_indices)
 
     # Warm start: use previous solution shifted by one step.
@@ -89,9 +87,7 @@ def _solve_online_planning_jax(
     pose_var_prev = BatchedSE3Var(jnp.arange(0, timesteps - 1))
     pose_var_next = BatchedSE3Var(jnp.arange(1, timesteps))
 
-    init_pose_vals = jaxlie.SE3(
-        robot.forward_kinematics(prev_sols)[..., target_links, :]
-    )
+    init_pose_vals = jaxlie.SE3(robot.forward_kinematics(prev_sols)[..., target_links, :])
 
     # --- Define Costs ---
     factors: list[jaxls.Cost] = []  # Changed type hint to jaxls.Cost
@@ -105,9 +101,7 @@ def _solve_online_planning_jax(
         joint_cfg = vals[joint_var]
         target_pose = vals[pose_var]
         Ts_joint_world = robot.forward_kinematics(joint_cfg)
-        residual = (
-            (jaxlie.SE3(Ts_joint_world[..., target_links, :])).inverse() @ (target_pose)
-        ).log()
+        residual = ((jaxlie.SE3(Ts_joint_world[..., target_links, :])).inverse() @ (target_pose)).log()
         return residual.flatten() * 100.0
 
     @jaxls.Cost.factory(name="SE3SmoothnessCost")
@@ -123,10 +117,7 @@ def _solve_online_planning_jax(
         vals: jaxls.VarValues,
         pose_var: BatchedSE3Var,
     ):
-        return (
-            (vals[pose_var].inverse() @ target_poses).log()
-            * jnp.array([50.0] * 3 + [20.0] * 3)
-        ).flatten()
+        return ((vals[pose_var].inverse() @ target_poses).log() * jnp.array([50.0] * 3 + [20.0] * 3)).flatten()
 
     @jaxls.Cost.factory(name="MatchStartPoseCost")
     def match_start_pose_cost(
@@ -216,9 +207,7 @@ def _solve_online_planning_jax(
         .analyze()
         .solve(
             verbose=False,
-            initial_vals=jaxls.VarValues.make(
-                (traj_var.with_value(prev_sols), pose_var.with_value(init_pose_vals))
-            ),
+            initial_vals=jaxls.VarValues.make((traj_var.with_value(prev_sols), pose_var.with_value(init_pose_vals))),
             termination=jaxls.TerminationConfig(max_iterations=20),
         )
     )

@@ -58,9 +58,7 @@ def _solve_ik_jax(
 
     # Get the batch axes for the variable through the target pose.
     # Batch axes for the variables and cost terms (e.g., target pose) should be broadcastable!
-    target_pose = jaxlie.SE3.from_rotation_and_translation(
-        jaxlie.SO3(target_wxyz), target_position
-    )
+    target_pose = jaxlie.SE3.from_rotation_and_translation(jaxlie.SO3(target_wxyz), target_position)
     batch_axes = target_pose.get_batch_axes()
 
     costs = [

@@ -3,6 +3,7 @@ Utilities for launching and configuring robots, sensors, and agents.
 """
 
 import logging
+import multiprocessing
 import subprocess
 import time
 from functools import partial
@@ -19,8 +20,6 @@ from robots_realtime.utils.portal_utils import (
     RemoteServer,
     launch_remote_get_local_handler,
 )
-import multiprocessing
-
 
 # Create logger for this module
 logger = logging.getLogger(__name__)

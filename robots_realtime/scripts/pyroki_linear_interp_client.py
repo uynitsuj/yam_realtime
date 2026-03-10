@@ -1,9 +1,11 @@
 import time
+
 import numpy as np
 import requests
 import viser
-from viser.extras import ViserUrdf
 from robot_descriptions.loaders.yourdfpy import load_robot_description
+from viser.extras import ViserUrdf
+
 
 def main():
     # 1. Setup Viser and Robot
@@ -16,9 +18,9 @@ def main():
     # 2. State Management
     # We store the trajectory in a dict so the callback can update it
     state = {
-        "traj": np.zeros((10, 8)), # Placeholder (10 timesteps, 8-DOF Panda)
+        "traj": np.zeros((10, 8)),  # Placeholder (10 timesteps, 8-DOF Panda)
         "needs_update": True,
-        "last_request_time": 0
+        "last_request_time": 0,
     }
 
     # 3. Interactive UI Elements
@@ -29,10 +31,7 @@ def main():
 
     # Interactive End Target
     ik_target = server.scene.add_transform_controls(
-        "/ik_target", 
-        scale=0.2, 
-        position=(0.4, 0.3, 0.3), 
-        wxyz=(0, 0, 1, 0)
+        "/ik_target", scale=0.2, position=(0.4, 0.3, 0.3), wxyz=(0, 0, 1, 0)
     )
 
     # UI Feedback
@@ -58,7 +57,7 @@ def main():
             response = requests.post("http://127.0.0.1:8116/plan", json=payload, timeout=10.0)
             response.raise_for_status()
             data = response.json()
-            
+
             state["traj"] = np.array(data["waypoints"])
             state["last_request_time"] = now
             solve_time_gui.value = data["compute_time"] * 1000
@@ -88,8 +87,9 @@ def main():
         else:
             # Scrub manually with slider
             urdf_vis.update_cfg(state["traj"][slider.value])
-        
+
         time.sleep(0.05)
+
 
 if __name__ == "__main__":
     main()

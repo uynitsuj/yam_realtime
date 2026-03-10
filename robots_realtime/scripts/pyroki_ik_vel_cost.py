@@ -53,7 +53,6 @@ def main():
             prev_cfg=np.array(solution),
         )
 
-
         # Update timing handle.
         elapsed_time = time.time() - start_time
         timing_handle.value = 0.99 * timing_handle.value + 0.01 * (elapsed_time * 1000)

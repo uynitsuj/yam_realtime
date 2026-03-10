@@ -198,9 +198,7 @@ class MjlabSimRobot(Robot):
         else:
             full = arm_pos
 
-        action = self._torch.tensor(
-            full, dtype=self._torch.float32, device=self._device
-        ).unsqueeze(0)  # [1, num_dofs]
+        action = self._torch.tensor(full, dtype=self._torch.float32, device=self._device).unsqueeze(0)  # [1, num_dofs]
 
         _obs, _rewards, terminated, truncated, _extras = self.env.step(action)
 

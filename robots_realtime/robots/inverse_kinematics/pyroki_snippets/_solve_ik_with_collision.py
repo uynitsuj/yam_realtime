@@ -36,9 +36,7 @@ def solve_ik_with_collision(
     assert target_position.shape == (3,) and target_wxyz.shape == (4,)
     target_link_idx = robot.links.names.index(target_link_name)
 
-    T_world_targets = jaxlie.SE3(
-        jnp.concatenate([jnp.array(target_wxyz), jnp.array(target_position)], axis=-1)
-    )
+    T_world_targets = jaxlie.SE3(jnp.concatenate([jnp.array(target_wxyz), jnp.array(target_position)], axis=-1))
     cfg = _solve_ik_with_collision_jax(
         robot,
         coll,
@@ -94,9 +92,7 @@ def _solve_ik_with_collision_jax(
     )
     costs.extend(
         [
-            pk.costs.world_collision_constraint(
-                robot, coll, joint_var, world_coll, 0.05
-            )
+            pk.costs.world_collision_constraint(robot, coll, joint_var, world_coll, 0.05)
             for world_coll in world_coll_list
         ]
     )

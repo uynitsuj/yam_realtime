@@ -95,9 +95,7 @@ def solve_trajopt(
         return (vals[var] - end_cfg).flatten()
 
     costs.append(start_pose_constraint(robot.joint_var_cls(jnp.arange(0, 2))))
-    costs.append(
-        end_pose_constraint(robot.joint_var_cls(jnp.arange(timesteps - 2, timesteps)))
-    )
+    costs.append(end_pose_constraint(robot.joint_var_cls(jnp.arange(timesteps - 2, timesteps))))
 
     # Velocity limits.
     costs.append(
@@ -118,12 +116,8 @@ def solve_trajopt(
         prev_traj_vars: jaxls.Var[jax.Array],
         curr_traj_vars: jaxls.Var[jax.Array],
     ):
-        coll = robot_coll.get_swept_capsules(
-            robot, vals[prev_traj_vars], vals[curr_traj_vars]
-        )
-        dist = pk.collision.collide(
-            coll.reshape((-1, 1)), world_coll_obj.reshape((1, -1))
-        )  # >0 means no collision
+        coll = robot_coll.get_swept_capsules(robot, vals[prev_traj_vars], vals[curr_traj_vars])
+        dist = pk.collision.collide(coll.reshape((-1, 1)), world_coll_obj.reshape((1, -1)))  # >0 means no collision
         return dist.flatten() - 0.05  # safety margin
 
     for world_coll_obj in world_coll:
@@ -178,9 +172,7 @@ def solve_iks_with_collision(
         pk.costs.pose_cost(
             robot,
             joint_var_0,
-            jaxlie.SE3.from_rotation_and_translation(
-                jaxlie.SO3(target_wxyz_0), target_position_0
-            ),
+            jaxlie.SE3.from_rotation_and_translation(jaxlie.SO3(target_wxyz_0), target_position_0),
             jnp.array(target_link_index),
             jnp.array([10.0] * 3),
             jnp.array([1.0] * 3),
@@ -188,9 +180,7 @@ def solve_iks_with_collision(
         pk.costs.pose_cost(
             robot,
             joint_var_1,
-            jaxlie.SE3.from_rotation_and_translation(
-                jaxlie.SO3(target_wxyz_1), target_position_1
-            ),
+            jaxlie.SE3.from_rotation_and_translation(jaxlie.SO3(target_wxyz_1), target_position_1),
             jnp.array(target_link_index),
             jnp.array([10.0] * 3),
             jnp.array([1.0] * 3),
@@ -239,9 +229,5 @@ def solve_iks_with_collision(
         ),
     )
 
-    sol = (
-        jaxls.LeastSquaresProblem(costs=costs, variables=variables)
-        .analyze()
-        .solve(verbose=False)
-    )
+    sol = jaxls.LeastSquaresProblem(costs=costs, variables=variables).analyze().solve(verbose=False)
     return sol[joint_var_0], sol[joint_var_1]

@@ -33,9 +33,7 @@ def depth_color_to_pointcloud(
         raise ValueError(f"Image array must be (H, W, 3), got shape {rgb_img.shape}")
 
     if depth.shape[:2] != rgb_img.shape[:2]:
-        raise ValueError(
-            f"Depth and image dimensions must match: {depth.shape[:2]} vs {rgb_img.shape[:2]}"
-        )
+        raise ValueError(f"Depth and image dimensions must match: {depth.shape[:2]} vs {rgb_img.shape[:2]}")
 
     if intrinsics.shape != (3, 3):
         raise ValueError(f"Intrinsics must be (3, 3), got shape {intrinsics.shape}")

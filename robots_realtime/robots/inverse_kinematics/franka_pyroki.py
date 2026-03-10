@@ -11,8 +11,11 @@ import pyroki as pk
 import viser.extras
 import viser.transforms as vtf
 
-from robots_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik_vel_cost import solve_ik_vel_cost as solve_ik_vel_cost
+from robots_realtime.robots.inverse_kinematics.pyroki_snippets._solve_ik_vel_cost import (
+    solve_ik_vel_cost as solve_ik_vel_cost,
+)
 from robots_realtime.robots.viser.viser_base import ViserAbstractBase
+
 
 class FrankaPyroki(ViserAbstractBase):
     """Interactive Franka Panda inverse kinematics helper.
@@ -112,7 +115,7 @@ class FrankaPyroki(ViserAbstractBase):
                 -2.3739204,
                 -0.01089052,
                 1.8737985,
-                -2.3463573 + np.pi*3/2,
+                -2.3463573 + np.pi * 3 / 2,
                 2.0000000e-02,
             ]
         )
@@ -125,7 +128,7 @@ class FrankaPyroki(ViserAbstractBase):
 
     def _initialize_transform_handles(self) -> None:
         default_position = (0.45, 0.0, 0.25)
-        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi, 0.0-np.pi/2).wxyz
+        default_orientation = vtf.SO3.from_rpy_radians(0.0, np.pi, 0.0 - np.pi / 2).wxyz
 
         left_handle = self.transform_handles.get("left")
         if left_handle and left_handle.control is not None:

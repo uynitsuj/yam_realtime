@@ -9,11 +9,9 @@ import logging
 from collections import deque
 from typing import Any, Dict, List, Optional
 
+import lerobot.robots  # noqa: F401 — resolve circular import in lerobot
 import numpy as np
 from dm_env.specs import Array
-
-import lerobot.robots  # noqa: F401 — resolve circular import in lerobot
-
 from lerobot_teleoperator_yamactiveleader import (
     YamActiveLeaderTeleoperator,
     YamActiveLeaderTeleoperatorConfig,
@@ -90,9 +88,7 @@ class GelloLeaderAgent(Agent):
     ) -> None:
         self.robot_name = robot_name
         self.joint_signs = np.array(joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
-        self.joint_offsets_deg = np.array(
-            joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64
-        )
+        self.joint_offsets_deg = np.array(joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
         self.include_gripper = include_gripper
         self.record_on_intervention = record_on_intervention
         self._held_action: Optional[Dict[str, Any]] = None
@@ -111,13 +107,11 @@ class GelloLeaderAgent(Agent):
             self.teleop.start_gripper_spring()
 
         if dagger_debug:
-            pose = np.array(
-                dagger_debug_pose_rad or self.DAGGER_DEBUG_POSE_RAD, dtype=np.float64
-            )
+            pose = np.array(dagger_debug_pose_rad or self.DAGGER_DEBUG_POSE_RAD, dtype=np.float64)
             # Invert agent transform: output_rad = deg2rad(signs * leader_deg + offsets)
             # → leader_deg = (rad2deg(output_rad) - offsets) * signs  (signs are ±1)
             target_deg = (np.rad2deg(pose) - self.joint_offsets_deg) * self.joint_signs
-            target_dict = {f"joint_{i+1}": float(target_deg[i]) for i in range(NUM_ARM_JOINTS)}
+            target_dict = {f"joint_{i + 1}": float(target_deg[i]) for i in range(NUM_ARM_JOINTS)}
             arm_pos = pose[:NUM_ARM_JOINTS].astype(np.float32)
             if include_gripper:
                 raw = self.teleop.get_action()
@@ -304,12 +298,8 @@ class BimanualGelloLeaderAgent(Agent):
 
         self.left_joint_signs = np.array(left_joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
         self.right_joint_signs = np.array(right_joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
-        self.left_joint_offsets_deg = np.array(
-            left_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64
-        )
-        self.right_joint_offsets_deg = np.array(
-            right_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64
-        )
+        self.left_joint_offsets_deg = np.array(left_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
+        self.right_joint_offsets_deg = np.array(right_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
 
         left_cfg = YamActiveLeaderTeleoperatorConfig(port=left_port, use_degrees=use_degrees, id=left_id)
         self.left_teleop = YamActiveLeaderTeleoperator(left_cfg)
@@ -407,30 +397,25 @@ class BimanualGelloLeaderAgent(Agent):
 
         if not self._recording_locked:
             if self.record_on_intervention:
-                out["_record"] = (
-                    bool(self.left_teleop.is_arm_hold_intervening)
-                    or bool(self.right_teleop.is_arm_hold_intervening)
+                out["_record"] = bool(self.left_teleop.is_arm_hold_intervening) or bool(
+                    self.right_teleop.is_arm_hold_intervening
                 )
 
             if self.record_on_gripper_squeeze:
                 left_grip = left_raw.get("gripper.pos", 85.0)
                 right_grip = right_raw.get("gripper.pos", 85.0)
                 out["_record"] = (
-                    left_grip < self.gripper_squeeze_threshold
-                    and right_grip < self.gripper_squeeze_threshold
+                    left_grip < self.gripper_squeeze_threshold and right_grip < self.gripper_squeeze_threshold
                 )
 
         if self.auto_stop_on_static and out.get("_record", False):
             # Only track static frames while actively recording — avoids firing
             # at startup when the arms are idle and haven't been touched yet.
-            joints = combined[:NUM_ARM_JOINTS * 2]
+            joints = combined[: NUM_ARM_JOINTS * 2]
             if self._last_joint_pos is not None:
                 delta = float(np.max(np.abs(joints - self._last_joint_pos)))
                 self._static_window.append(delta < self.static_threshold_rad)
-                if (
-                    len(self._static_window) == self._static_window.maxlen
-                    and all(self._static_window)
-                ):
+                if len(self._static_window) == self._static_window.maxlen and all(self._static_window):
                     out["_record"] = False
                     self._static_window.clear()
                     self._recording_locked = True
@@ -440,7 +425,7 @@ class BimanualGelloLeaderAgent(Agent):
             # Not recording — keep window and last_pos fresh so the first
             # static check after recording starts has a valid reference.
             self._static_window.clear()
-            self._last_joint_pos = combined[:NUM_ARM_JOINTS * 2].copy()
+            self._last_joint_pos = combined[: NUM_ARM_JOINTS * 2].copy()
 
         return out
 

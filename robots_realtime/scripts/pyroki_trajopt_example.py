@@ -10,14 +10,13 @@ from typing import Literal
 
 import numpy as np
 import pyroki as pk
-import trimesh
 import tyro
 import viser
-from viser.extras import ViserUrdf
 from robot_descriptions.loaders.yourdfpy import load_robot_description
+from viser.extras import ViserUrdf
 
 import robots_realtime.robots.inverse_kinematics.pyroki_snippets as pks
-import time
+
 
 def main(robot_name: Literal["ur5", "panda"] = "panda"):
     if robot_name == "ur5":
@@ -50,9 +49,7 @@ def main(robot_name: Literal["ur5", "panda"] = "panda"):
 
     # Define the obstacles:
     # - Ground
-    ground_coll = pk.collision.HalfSpace.from_point_and_normal(
-        np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])
-    )
+    ground_coll = pk.collision.HalfSpace.from_point_and_normal(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]))
     # - Wall
     wall_height = 0.4
     wall_width = 0.1
@@ -113,9 +110,7 @@ def main(robot_name: Literal["ur5", "panda"] = "panda"):
             axes_radius=0.01,
         )
 
-    slider = server.gui.add_slider(
-        "Timestep", min=0, max=timesteps - 1, step=1, initial_value=0
-    )
+    slider = server.gui.add_slider("Timestep", min=0, max=timesteps - 1, step=1, initial_value=0)
     playing = server.gui.add_checkbox("Playing", initial_value=True)
 
     while True:

@@ -41,11 +41,9 @@ The inverse (follower → leader command) is::
 import logging
 from typing import Any, Dict, List, Optional
 
+import lerobot.robots  # noqa: F401 — resolve circular import in lerobot
 import numpy as np
 from dm_env.specs import Array
-
-import lerobot.robots  # noqa: F401 — resolve circular import in lerobot
-
 from lerobot_teleoperator_yamactiveleader import (
     YamActiveLeaderTeleoperator,
     YamActiveLeaderTeleoperatorConfig,
@@ -115,9 +113,7 @@ class BilateralLeaderAgent(Agent):
     ) -> None:
         self.robot_name = robot_name
         self.joint_signs = np.array(joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
-        self.joint_offsets_deg = np.array(
-            joint_offsets_deg or [0.0] * NUM_ARM_JOINTS, dtype=np.float64
-        )
+        self.joint_offsets_deg = np.array(joint_offsets_deg or [0.0] * NUM_ARM_JOINTS, dtype=np.float64)
         self.include_gripper = include_gripper
         self.bilateral_kp = float(bilateral_kp)
         self._torque_limit = int(np.clip(bilateral_kp * bilateral_torque_max, 0, 1000))
@@ -203,9 +199,7 @@ class BilateralLeaderAgent(Agent):
         position error (q_follower − q_leader_current).
         """
         # Inverse of: follower_rad = deg2rad(joint_signs * leader_deg + offsets)
-        leader_cmd_deg = self.joint_signs * (
-            np.rad2deg(follower_rad) - self.joint_offsets_deg
-        )
+        leader_cmd_deg = self.joint_signs * (np.rad2deg(follower_rad) - self.joint_offsets_deg)
 
         bus = self.teleop.bus
 

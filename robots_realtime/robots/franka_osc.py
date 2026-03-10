@@ -27,10 +27,10 @@ KD_ori = 25.0
 
 # Define these as constants or class attributes
 MAX_POS_ERR = 0.08  # Caps max force/velocity for translation
-MAX_ORI_ERR = 0.2   # Caps max torque/velocity for rotation
+MAX_ORI_ERR = 0.2  # Caps max torque/velocity for rotation
 
-KP_6D = np.array([KP_pos]*3 + [KP_ori]*3)
-KD_6D = np.array([KD_pos]*3 + [KD_ori]*3)
+KP_6D = np.array([KP_pos] * 3 + [KP_ori] * 3)
+KD_6D = np.array([KD_pos] * 3 + [KD_ori] * 3)
 
 # Joint impedance for null space (example, can be changed)
 # Kp_null = np.array([50.0, 50.0, 50.0, 50.0, 40.0, 25.0, 25.0])
@@ -261,8 +261,12 @@ class FrankaPanda(Robot):
                     time_buff = 20.00
                     if time.time() - self.ctrl_thread_start_time < time_buff and np.linalg.norm(err_6d) > 0.01:
                         # start with 2.0 then slowly increase to 100.0 as ctrl_thread_start_time gets closer to time_buff
-                        clip_value = 1.0 + np.clip((20.0 - 1.0) * ((time.time() - self.ctrl_thread_start_time) - 5.0) / time_buff, 0.0, 20.0)
-                        tau = np.clip(tau, -clip_value, clip_value)  # If far away from home pose at init, clip torque to avoid high velocity homing
+                        clip_value = 1.0 + np.clip(
+                            (20.0 - 1.0) * ((time.time() - self.ctrl_thread_start_time) - 5.0) / time_buff, 0.0, 20.0
+                        )
+                        tau = np.clip(
+                            tau, -clip_value, clip_value
+                        )  # If far away from home pose at init, clip torque to avoid high velocity homing
                         print(f"Clipping torque to {clip_value}")
                         print(tau)
 

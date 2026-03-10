@@ -7,9 +7,7 @@ import jax.numpy as jnp
 import jax_dataclasses as jdc
 import jaxlie
 import jaxls
-
 import numpy as onp
-
 import pyroki as pk
 
 
@@ -38,9 +36,7 @@ def solve_ik_with_manipulability(
     assert target_position.shape == (3,) and target_wxyz.shape == (4,)
     target_link_idx = robot.links.names.index(target_link_name)
 
-    T_world_target = jaxlie.SE3(
-        jnp.concatenate([jnp.array(target_wxyz), jnp.array(target_position)], axis=-1)
-    )
+    T_world_target = jaxlie.SE3(jnp.concatenate([jnp.array(target_wxyz), jnp.array(target_position)], axis=-1))
     cfg = _solve_ik_jax(
         robot,
         T_world_target,

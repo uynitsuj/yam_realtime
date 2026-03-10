@@ -6,6 +6,7 @@ from xml.etree import ElementTree as ET
 import mujoco
 import mujoco.viewer
 import tyro
+from xdof_sdk.data.schema.types import Transform3D, WorldFrame
 
 from robots_realtime.mujoco.envs.schema.robot import (
     STATION_ROBOT_MAP,
@@ -15,7 +16,6 @@ from robots_realtime.mujoco.envs.schema.robot import (
     RobotSpecConfig,
     XMIStationSpecConfig,
 )
-from xdof_sdk.data.schema.types import Transform3D, WorldFrame
 
 WORLD_FRAME_NAME = "left_arm"
 FLANGE_FRAME_NAME = "flange_frame"

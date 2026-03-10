@@ -88,6 +88,7 @@ def _silence_c_stderr():
 # Streaming primitives
 # ---------------------------------------------------------------------------
 
+
 class _NumericStream:
     """Appends float32 rows to a ``.bin`` scratch file; finalises to ``.npy``."""
 
@@ -143,19 +144,21 @@ class _NumericStream:
 #     def close(self) -> None:
 #         self._writer.release()
 
+
 class _VideoStream:
     """Streams uint8 RGB frames using imageio-ffmpeg for better UI compatibility."""
 
     def __init__(self, path: Path, fps: float, h: int, w: int) -> None:
         import imageio
+
         # 'libx264' is the gold standard for H.264
         # 'pix_fmt="yuv420p"' for compatibility
         self._writer = imageio.get_writer(
-            str(path), 
-            fps=fps, 
-            codec='libx264', 
-            pixelformat='yuv420p',
-            macro_block_size=8 # Helps with odd-dimension resolutions
+            str(path),
+            fps=fps,
+            codec="libx264",
+            pixelformat="yuv420p",
+            macro_block_size=8,  # Helps with odd-dimension resolutions
         )
 
     def write(self, frame: np.ndarray) -> None:
@@ -164,6 +167,7 @@ class _VideoStream:
 
     def close(self) -> None:
         self._writer.close()
+
 
 def _is_image(arr: np.ndarray) -> bool:
     return arr.dtype == np.uint8 and arr.ndim == 3 and arr.shape[2] == 3
@@ -176,6 +180,7 @@ def _short_uid(n: int = 8) -> str:
 # ---------------------------------------------------------------------------
 # Logger
 # ---------------------------------------------------------------------------
+
 
 class TrajectoryLogger:
     """Records teleoperation steps and streams them directly to disk.
@@ -209,9 +214,7 @@ class TrajectoryLogger:
             return
         now = datetime.now()
         self._ep_dir = (
-            self.save_path
-            / now.strftime("%Y%m%d")
-            / f"episode_{now.strftime('%Y%m%d_%H%M%S')}_{_short_uid()}"
+            self.save_path / now.strftime("%Y%m%d") / f"episode_{now.strftime('%Y%m%d_%H%M%S')}_{_short_uid()}"
         )
         self._ep_dir.mkdir(parents=True, exist_ok=True)
         self._streams = {}
@@ -269,9 +272,7 @@ class TrajectoryLogger:
     # Internal
     # ------------------------------------------------------------------ #
 
-    def _open_stream(
-        self, key: str, arr: np.ndarray
-    ) -> Union[_NumericStream, _VideoStream]:
+    def _open_stream(self, key: str, arr: np.ndarray) -> Union[_NumericStream, _VideoStream]:
         assert self._ep_dir is not None
         if _is_image(arr):
             h, w = arr.shape[:2]
@@ -297,6 +298,7 @@ class TrajectoryLogger:
 # Trigger helpers  (all optional — use whichever fits your workflow)
 # ---------------------------------------------------------------------------
 
+
 def attach_keyboard_listener(logger: TrajectoryLogger) -> None:
     """Spawn a daemon thread reading stdin commands.
 
@@ -307,8 +309,10 @@ def attach_keyboard_listener(logger: TrajectoryLogger) -> None:
 
     Suitable for interactive terminal sessions.
     """
+
     def _loop() -> None:
         import sys
+
         print("[logger] Keyboard trigger active —  r=record/stop  d=discard  q=quit")
         while True:
             try:
@@ -323,6 +327,7 @@ def attach_keyboard_listener(logger: TrajectoryLogger) -> None:
                 elif cmd == "q":
                     print("[logger] Quit requested.")
                     import ctypes
+
                     ctypes.pythonapi.PyThreadState_SetAsyncExc(
                         ctypes.c_ulong(threading.main_thread().ident),
                         ctypes.py_object(KeyboardInterrupt),
@@ -405,5 +410,4 @@ def attach_signal_handler(logger: TrajectoryLogger) -> None:
 
     signal.signal(signal.SIGUSR1, _toggle)
     signal.signal(signal.SIGUSR2, _discard)
-    print(f"[logger] Signal trigger active — PID {os.getpid()}"
-          "  (SIGUSR1=toggle, SIGUSR2=discard)")
+    print(f"[logger] Signal trigger active — PID {os.getpid()}  (SIGUSR1=toggle, SIGUSR2=discard)")

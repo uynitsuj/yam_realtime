@@ -2,6 +2,7 @@
 Abstract base class for bimanual robot headless visualization.
 """
 
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -11,9 +12,7 @@ import numpy as np
 import viser
 import viser.extras
 import viser.transforms as vtf
-
 import yourdfpy
-import os
 
 try:
     from robot_descriptions.loaders.yourdfpy import load_robot_description as load_urdf_robot_description
@@ -30,6 +29,7 @@ class TransformHandle:
     tcp_offset_frame: viser.FrameHandle
     control: Optional[viser.TransformControlsHandle] = None
 
+
 def set_min_distance_from_limits(urdf: yourdfpy.URDF, min_distance_from_limits: float = 0.15) -> yourdfpy.URDF:
     """
     Set the minimum distance from limits for the robot.
@@ -41,6 +41,7 @@ def set_min_distance_from_limits(urdf: yourdfpy.URDF, min_distance_from_limits: 
                 joint.limit.lower = joint.limit.lower + min_distance_from_limits
                 joint.limit.upper = joint.limit.upper - min_distance_from_limits
     return urdf
+
 
 class ViserAbstractBase(ABC):
     """
@@ -62,19 +63,23 @@ class ViserAbstractBase(ABC):
         self.bimanual = bimanual
         self.coordinate_frame = coordinate_frame
 
-
-        if robot_description == "yam_description": # temporary fix for yam_description
+        if robot_description == "yam_description":  # temporary fix for yam_description
             # current path
             current_path = os.path.dirname(os.path.abspath(__file__))
-            urdf_path = os.path.join(current_path, "..", "..", "..", "dependencies", "i2rt", "i2rt", "robot_models", "yam", "yam.urdf")
-            mesh_dir = os.path.join(current_path, "..", "..", "..", "dependencies", "i2rt", "i2rt", "robot_models", "yam", "assets")
+            urdf_path = os.path.join(
+                current_path, "..", "..", "..", "dependencies", "i2rt", "i2rt", "robot_models", "yam", "yam.urdf"
+            )
+            mesh_dir = os.path.join(
+                current_path, "..", "..", "..", "dependencies", "i2rt", "i2rt", "robot_models", "yam", "assets"
+            )
             self.urdf = yourdfpy.URDF.load(
                 urdf_path,
                 mesh_dir=mesh_dir,
             )
         else:
-            self.urdf = set_min_distance_from_limits(load_urdf_robot_description(robot_description), min_distance_from_limits=0.25)
-
+            self.urdf = set_min_distance_from_limits(
+                load_urdf_robot_description(robot_description), min_distance_from_limits=0.25
+            )
 
         self.viser_server = viser_server if viser_server is not None else viser.ViserServer()
 

@@ -8,6 +8,7 @@ from copy import deepcopy
 from typing import Any, Dict, Optional
 
 import numpy as np
+import requests
 import viser
 import viser.extras
 import viser.transforms as vtf
@@ -16,10 +17,9 @@ from dm_env.specs import Array
 from robots_realtime.agents.agent import Agent
 from robots_realtime.robots.inverse_kinematics.franka_pyroki import FrankaPyroki
 from robots_realtime.sensors.cameras.camera_utils import obs_get_rgb, resize_with_center_crop
-from robots_realtime.utils.portal_utils import remote
 from robots_realtime.utils.depth_utils import depth_color_to_pointcloud
+from robots_realtime.utils.portal_utils import remote
 
-import requests
 
 class FrankaPyrokiViserAgentLinearInterp(Agent):
     """Interactive teleoperation agent for Franka OSC robots.
@@ -60,7 +60,9 @@ class FrankaPyrokiViserAgentLinearInterp(Agent):
         self._curr_joint_target = self.ik.rest_pose
         self.executing_traj = False
         if self.robotiq_gripper:
-            self.ik.transform_handles.get("left").tcp_offset_frame.wxyz = vtf.SO3.from_rpy_radians(0.0, 0.0, np.pi/4).wxyz
+            self.ik.transform_handles.get("left").tcp_offset_frame.wxyz = vtf.SO3.from_rpy_radians(
+                0.0, 0.0, np.pi / 4
+            ).wxyz
             self.ik.transform_handles.get("left").tcp_offset_frame.position = (0.0, 0.0, -0.157)
         self.ik_thread = threading.Thread(target=self.ik.run, name="franka_pyroki_ik")
         self.ik_thread.daemon = True
@@ -102,7 +104,7 @@ class FrankaPyrokiViserAgentLinearInterp(Agent):
 
             mod_factor = 5
             for i, waypoint in enumerate(data["waypoints"]):
-                # visualize with viser urdfs 
+                # visualize with viser urdfs
                 # skip if i is not % 5 == 0
                 if i % mod_factor != 0:
                     continue
@@ -151,9 +153,13 @@ class FrankaPyrokiViserAgentLinearInterp(Agent):
         )
         for mesh in self.urdf_vis_left_real._meshes:
             mesh.opacity = 0.3  # type: ignore[attr-defined]
-        
-        self.real_eef_frame_left = self.viser_server.scene.add_frame("/franka_real/eef", show_axes=True, axes_length=0.1, axes_radius=0.005)
-        self.target_eef_frame_left = self.viser_server.scene.add_frame("/target_eef", show_axes=True, axes_length=0.1, axes_radius=0.005)
+
+        self.real_eef_frame_left = self.viser_server.scene.add_frame(
+            "/franka_real/eef", show_axes=True, axes_length=0.1, axes_radius=0.005
+        )
+        self.target_eef_frame_left = self.viser_server.scene.add_frame(
+            "/target_eef", show_axes=True, axes_length=0.1, axes_radius=0.005
+        )
 
         self.execute_traj_button = self.viser_server.gui.add_button(label="Execute Trajectory")
 
@@ -162,7 +168,6 @@ class FrankaPyrokiViserAgentLinearInterp(Agent):
             """Execute the trajectory."""
             print("Executing trajectory...")
             self._execute_traj()
-
 
         if self.bimanual and self.right_arm_extrinsic is not None:
             self.ik.base_frame_right.position = np.array(self.right_arm_extrinsic["position"])
@@ -193,7 +198,7 @@ class FrankaPyrokiViserAgentLinearInterp(Agent):
             self.right_gripper_slider_handle = self.viser_server.gui.add_slider(
                 label="Gripper Width (R)", min=0.0, max=0.1, step=0.001, initial_value=0.1
             )
-        
+
         self.camera_frustum_handles: Dict[str, viser.CameraFrustumHandle] = {}
 
     def _update_visualization(self) -> None:
@@ -208,13 +213,11 @@ class FrankaPyrokiViserAgentLinearInterp(Agent):
                 time.sleep(self._update_period)
                 continue
 
-
             self.real_eef_frame_left.position = self.ik.robot.forward_kinematics(obs_copy["left"]["joint_pos"])[-4][4:]
             self.real_eef_frame_left.wxyz = self.ik.robot.forward_kinematics(obs_copy["left"]["joint_pos"])[-4][:4]
 
             self.target_eef_frame_left.position = self.ik.robot.forward_kinematics(self.ik.joints["left"])[-4][4:]
             self.target_eef_frame_left.wxyz = self.ik.robot.forward_kinematics(self.ik.joints["left"])[-4][:4]
-
 
             left_joint_pos = self._extract_joint_pos(obs_copy, "left")
             if left_joint_pos is not None:
@@ -229,18 +232,20 @@ class FrankaPyrokiViserAgentLinearInterp(Agent):
             if rgb_images:
                 for key, image in rgb_images.items():
                     if key not in self.viser_cam_img_handles:
-                        self.viser_cam_img_handles[key] = self.viser_server.gui.add_image(resize_with_center_crop(image, 224, 224), label=key)
+                        self.viser_cam_img_handles[key] = self.viser_server.gui.add_image(
+                            resize_with_center_crop(image, 224, 224), label=key
+                        )
                     if self.visualize_rgbd:
                         self.viser_cam_img_handles[key].image = resize_with_center_crop(image, 224, 224)
 
                     if key not in self.camera_frustum_handles:
                         self.camera_frustum_handles[key] = self.viser_server.scene.add_camera_frustum(
-                            name = f"camera_frustum_{key}",
-                            fov = 1.2,
-                            aspect = 1.0,
-                            scale = 0.05,
-                            cast_shadow = False,
-                            receive_shadow = False,
+                            name=f"camera_frustum_{key}",
+                            fov=1.2,
+                            aspect=1.0,
+                            scale=0.05,
+                            cast_shadow=False,
+                            receive_shadow=False,
                         )
                     if self.visualize_rgbd:
                         self.camera_frustum_handles[key].image = resize_with_center_crop(image, 224, 224)
@@ -249,19 +254,28 @@ class FrankaPyrokiViserAgentLinearInterp(Agent):
 
                     self.camera_frustum_handles[key].position = (1.0, 0, 0.29)
 
-                    self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
+                    self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(
+                        np.pi / 2 - np.pi / 6, np.pi, -np.pi / 2
+                    ).wxyz
 
                     if "depth_data" in obs_copy[key] and self.visualize_rgbd:
                         depth_data = obs_copy[key]["depth_data"]
                         points, colors = depth_color_to_pointcloud(
-                            depth = depth_data,
-                            rgb_img = image,
-                            intrinsics = obs_copy[key]["intrinsics"]["left"]["intrinsics_matrix"], # We assume we're taking left camera image from a stereo pair
-                            subsample_factor = 4,
-                            depth_clip_range = (0.015, 1.2),
+                            depth=depth_data,
+                            rgb_img=image,
+                            intrinsics=obs_copy[key]["intrinsics"]["left"][
+                                "intrinsics_matrix"
+                            ],  # We assume we're taking left camera image from a stereo pair
+                            subsample_factor=4,
+                            depth_clip_range=(0.015, 1.2),
                         )
-                        self.viser_server.scene.add_point_cloud(name = f"camera_frustum_{key}/point_cloud_{key}", points = points, colors = colors, point_size = 0.002)
-                
+                        self.viser_server.scene.add_point_cloud(
+                            name=f"camera_frustum_{key}/point_cloud_{key}",
+                            points=points,
+                            colors=colors,
+                            point_size=0.002,
+                        )
+
                 time.sleep(self._update_period)
 
     # ------------------------------------------------------------------

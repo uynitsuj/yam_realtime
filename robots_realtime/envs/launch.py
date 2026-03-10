@@ -23,9 +23,9 @@ from robots_realtime.utils.launch_utils import (
     initialize_agent,
     initialize_robots,
     initialize_sensors,
+    run_server_proc,
     setup_can_interfaces,
     setup_logging,
-    run_server_proc,
 )
 
 
@@ -194,10 +194,11 @@ def _make_logger(config: LaunchConfig):
         attach_keyboard_listener,
         attach_signal_handler,
     )
+
     tl = TrajectoryLogger(config.record_path, fps=config.hz)
-    attach_file_watcher(tl)          # headless: touch /tmp/record.flag
-    attach_keyboard_listener(tl)     # interactive: r + Enter
-    attach_signal_handler(tl)        # scripted:   kill -USR1 <pid>
+    attach_file_watcher(tl)  # headless: touch /tmp/record.flag
+    attach_keyboard_listener(tl)  # interactive: r + Enter
+    attach_signal_handler(tl)  # scripted:   kill -USR1 <pid>
     return tl
 
 

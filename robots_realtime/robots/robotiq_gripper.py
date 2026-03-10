@@ -19,20 +19,19 @@ __version__ = "1.0.0"
 
 # Iport libraries
 import logging
+import threading
 import time
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 import minimalmodbus as mm
+import numpy as np
 import serial
 import serial.tools.list_ports
-from robots_realtime.robots.utils import Rate
-from typing import Any, Dict
-import numpy as np
 from i2rt.robots.robot import Robot
-import threading
 from i2rt.utils.utils import RateRecorder
-from dataclasses import dataclass
 
+from robots_realtime.robots.utils import Rate
 from robots_realtime.utils.performance_utils import set_realtime_and_pin
 
 # Constants
@@ -672,7 +671,6 @@ class RobotiqGripper(mm.Instrument):
         return is_calibrated
 
 
-
 @dataclass
 class RobotiqGripperCommand:
     joint_pos: int  # 0-255
@@ -746,9 +744,7 @@ class RobotiqGripperRobot(Robot):
 
     def _command_execution_loop(self) -> None:
         """Thread that processes gripper commands."""
-        with RateRecorder(
-            name="robotiq gripper loop"
-        ) as rate_recorder:
+        with RateRecorder(name="robotiq gripper loop") as rate_recorder:
             while not self._stop_thread:
                 # Initialize t_start at the beginning to ensure it's always defined
                 with self._lock:

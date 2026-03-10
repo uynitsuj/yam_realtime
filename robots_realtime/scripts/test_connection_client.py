@@ -1,9 +1,10 @@
 import asyncio
+import struct
 import time
-import numpy as np
+
 import msgpack
 import msgpack_numpy as m
-import struct
+import numpy as np
 
 m.patch()  # enable numpy support
 
@@ -11,14 +12,17 @@ m.patch()  # enable numpy support
 def encode_msg(obj: dict) -> bytes:
     return msgpack.packb(obj, use_bin_type=True)
 
+
 def decode_msg(raw: bytes) -> dict:
     return msgpack.unpackb(raw, raw=True)
+
 
 async def send_framed(writer, obj: dict):
     payload = encode_msg(obj)
     header = struct.pack("!I", len(payload))
     writer.write(header + payload)
     await writer.drain()
+
 
 async def recv_framed(reader):
     header = await reader.readexactly(4)
@@ -52,8 +56,7 @@ class MsgpackNumpyClient:
             await self.writer.wait_closed()
 
 
-async def run_test(host="127.0.0.1", port=9000, 
-                   duration=3, shape=(720, 1280, 3)):
+async def run_test(host="127.0.0.1", port=9000, duration=3, shape=(720, 1280, 3)):
     client = MsgpackNumpyClient(host, port)
     await client.connect()
 
@@ -75,12 +78,13 @@ async def run_test(host="127.0.0.1", port=9000,
     elapsed = time.time() - start
     mbps = sent_bytes / elapsed / 1e6
 
-    print(f"[RESULT] Sent {sent_bytes/1e6:.2f} MB in {elapsed:.2f} sec")
+    print(f"[RESULT] Sent {sent_bytes / 1e6:.2f} MB in {elapsed:.2f} sec")
     print(f"[THROUGHPUT] {mbps:.2f} MB/s")
     print(f"[COUNTER] Sent {counter} messages")
     print(f"Last server response: {resp}")
 
     await client.close()
+
 
 async def latency_test(host="127.0.0.1", port=9000, trials=200):
     client = MsgpackNumpyClient(host, port)
@@ -99,10 +103,11 @@ async def latency_test(host="127.0.0.1", port=9000, trials=200):
 
     print("\n===== LATENCY RESULTS =====")
     print(f"min: {min(latencies_ms):.3f} ms")
-    print(f"avg: {sum(latencies_ms)/len(latencies_ms):.3f} ms")
+    print(f"avg: {sum(latencies_ms) / len(latencies_ms):.3f} ms")
     print(f"max: {max(latencies_ms):.3f} ms")
     print(f"std: {np.std(latencies_ms):.3f} ms")
     print("===========================\n")
+
 
 if __name__ == "__main__":
     # Change host to remote IP (e.g., 128.32.175.97) for real test

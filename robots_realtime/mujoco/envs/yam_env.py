@@ -1,4 +1,3 @@
-
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional
@@ -486,9 +485,9 @@ def main(args: Args) -> None:
             state = trajectory["state"]
             env.reset()
             env.load_state(state[0])
-    # if args.policy == "single_gello":
-    #     from robots_realtime.agents.gello_agent import RainbowGelloAgent
-    #     from robots_realtime.robots.generic_robot import GenericRobot, GenericRobotConfig
+        # if args.policy == "single_gello":
+        #     from robots_realtime.agents.gello_agent import RainbowGelloAgent
+        #     from robots_realtime.robots.generic_robot import GenericRobot, GenericRobotConfig
 
         config = GenericRobotConfig(
             driver_type="dynamixel",

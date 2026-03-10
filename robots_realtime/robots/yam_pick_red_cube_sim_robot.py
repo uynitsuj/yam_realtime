@@ -11,7 +11,7 @@ Prerequisites:
       DYLD_LIBRARY_PATH=... .venv/bin/mjpython robots_realtime/envs/launch.py ...
 """
 
-from typing import Dict, Optional
+from typing import Dict
 
 import numpy as np
 from i2rt.robots.robot import Robot

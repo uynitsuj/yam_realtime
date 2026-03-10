@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from functools import lru_cache
-from pathlib import Path
-from typing import Any, List
 import time
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pyroki as pk  # type: ignore
 import uvicorn
@@ -46,9 +46,7 @@ def slerp_quaternions(
 
     # Convert back to wxyz format
     quats_xyzw = interp_rots.as_quat()
-    quats_wxyz = np.column_stack(
-        [quats_xyzw[:, 3], quats_xyzw[:, 0], quats_xyzw[:, 1], quats_xyzw[:, 2]]
-    )
+    quats_wxyz = np.column_stack([quats_xyzw[:, 3], quats_xyzw[:, 0], quats_xyzw[:, 1], quats_xyzw[:, 2]])
     return quats_wxyz
 
 
@@ -227,6 +225,7 @@ def _build_world_coll(obstacles: list[dict[str, Any]] | None):
 # SERVER INIT — Load Pyroki Only Once
 # =====================================================
 
+
 def set_min_distance_from_limits(urdf: yourdfpy.URDF, min_distance_from_limits: float = 0.15) -> yourdfpy.URDF:
     """
     Set the minimum distance from limits for the robot.
@@ -239,9 +238,8 @@ def set_min_distance_from_limits(urdf: yourdfpy.URDF, min_distance_from_limits: 
                 joint.limit.upper = joint.limit.upper - min_distance_from_limits
     return urdf
 
-def init_pyroki_server(
-    robot_urdf_name: str = "panda_description", target_link_name: str = "panda_hand"
-):
+
+def init_pyroki_server(robot_urdf_name: str = "panda_description", target_link_name: str = "panda_hand"):
     global _ROBOT, _ROBOT_COLL, _TARGET_LINK
 
     logger.info(f"Loading robot URDF '{robot_urdf_name}' with Pyroki...")
@@ -337,10 +335,7 @@ async def plan_motion(req: PlanRequest):
         logger.exception("Planning failure")
         raise HTTPException(500, f"Motion planning failed: {e}")
 
-    return PlanResponse(
-        waypoints=sol_traj.tolist(),
-        compute_time=compute_time
-    )
+    return PlanResponse(waypoints=sol_traj.tolist(), compute_time=compute_time)
 
 
 # =====================================================

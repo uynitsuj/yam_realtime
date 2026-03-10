@@ -1,15 +1,12 @@
 import time
 
 import lerobot.robots  # noqa: F401 — resolve circular import in lerobot
-
 from lerobot_teleoperator_yamactiveleader import (
-    YamActiveLeaderTeleoperatorConfig,
     YamActiveLeaderTeleoperator,
+    YamActiveLeaderTeleoperatorConfig,
 )
 
-teleop = YamActiveLeaderTeleoperator(
-    YamActiveLeaderTeleoperatorConfig(port="/dev/tty.usbmodem5AE60805531")
-)
+teleop = YamActiveLeaderTeleoperator(YamActiveLeaderTeleoperatorConfig(port="/dev/tty.usbmodem5AE60805531"))
 teleop.connect()
 
 try:
