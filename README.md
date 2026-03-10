@@ -11,9 +11,7 @@ Examples:
 <img src="media/yam_active_leader_dagger.gif" width="500">
 
 For details on how to build and assemble your own YAM active leader arms see its [github repo](https://github.com/uynitsuj/lerobot_teleoperator_yamactiveleader)!
-<!-- ![yam_realtime](media/yam_realtime.gif) -->
-<!-- ![franka_realtime](media/franka_realtime.gif) -->
-<!-- ![franka_realtime2](media/franka_realtime2.gif) -->
+
 
 ## Installation
 Clone the repository and initialize submodules:
@@ -36,11 +34,11 @@ If using YAM arms, configure YAM arms CAN chain according to instructions from t
 
 ## Launch
 Then run the launch entrypoint script with an appropriate robot config file.
-For Bimanual YAMS:
+For Real-World Bimanual YAMS:
 ```bash
 uv run robots_realtime/envs/launch.py --config_path configs/yam/yam_viser_bimanual.yaml
 ```
-For Franka Panda (with default panda gripper):
+For Real-World Franka Panda (with default panda gripper):
 ```bash
 uv sync --extra sensors --extra franka_panda
 uv run robots_realtime/envs/launch.py --config_path configs/franka/franka_viser_osc.yaml
@@ -82,9 +80,3 @@ ruff check # lint
 ruff check --fix # lint and fix anything fixable
 ruff format # code format
 ```
-
-## Roadmap/Todos
-
-- [ ] Add data logging infrastructure
-- [ ] Implement a [Diffusion Policy](https://diffusion-policy.cs.columbia.edu/) agent controller
-- [ ] Implement a [Physical Intelligence π0](https://www.physicalintelligence.company/blog/pi0) agent controller
