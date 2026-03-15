@@ -34,8 +34,8 @@ robots:
     render_cameras: false
     # physics_dt: 0.002
     # control_decimation: 17
-    task: "inhand_transfer"
-    # task: "bottles"          # alternative: static named scene
+    # task: "inhand_transfer"
+    task: "bottles"          # alternative: static named scene
     # task: "dish_brush"
     # scene_xml: "dependencies/xdof-sim/xdof_sim/models/yam_dish_brush_scene.xml"
     viser_port: 8080
