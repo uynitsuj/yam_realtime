@@ -209,10 +209,14 @@ class XdofSimRobot(Robot):
         control_decimation: Number of physics steps per control step.
             Effective control rate = 1 / (physics_dt x control_decimation).
             Default 17 x 0.002s ≈ 30 Hz; set to 10 for ~50 Hz.
-        task: Task name to load (e.g. "bottle_pickup", "fruit_bowl",
-            "tabletop_sort", "handover", "stack_cups"). Uses the extensible
-            task scene system from xdof_sim.task_builder. None falls back to
-            the default yam_bimanual_scene.xml.
+        task: Named task scene to load — one of the keys in xdof_sim's
+            _SCENE_XMLS dict (e.g. "bottles", "marker", "dish_brush").
+            Ignored when scene_xml is set.  None falls back to the default
+            yam_bimanual_scene.xml.
+        scene_xml: Explicit path to a MuJoCo XML file.  Takes priority over
+            task.  Accepts absolute paths or paths relative to the working
+            directory.  Use this to load custom scenes not registered in
+            _SCENE_XMLS.
         scene_variant: Optional scene variant to apply at startup.
             One of "eval", "training", "hybrid".  None leaves the default
             scene as-is.
@@ -228,31 +232,61 @@ class XdofSimRobot(Robot):
         render_cameras: bool = False,
         physics_dt: float = 0.002,
         control_decimation: int = 17,
-        task: Optional[str] = "bottle_pickup",
+        task: Optional[str] = None,
+        scene_xml: Optional[str] = None,
         scene_variant: Optional[str] = None,
         viser_port: int = 8080,
         viser_preview_size: int = 244,
         record_camera_size: int = 864,
     ) -> None:
         from xdof_sim.config import get_i2rt_sim_config
-        from xdof_sim.env import MuJoCoYAMEnv
+        from xdof_sim.env import MuJoCoYAMEnv, _SCENE_XMLS
 
         config = get_i2rt_sim_config()
-        self._env = MuJoCoYAMEnv(
-            config=config,
-            render_cameras=render_cameras,
-            physics_dt=physics_dt,
-            control_decimation=control_decimation,
-            task=task,
-        )
+
+        if task == "inhand_transfer":
+            from xdof_sim.inhand_transfer_env import InHandTransferEnv
+            self._env = InHandTransferEnv(
+                config=config,
+                render_cameras=render_cameras,
+                physics_dt=physics_dt,
+                control_decimation=control_decimation,
+            )
+            self._randomizing_env = True
+        else:
+            # Resolve scene XML: explicit path > named task > env default
+            resolved_xml: Optional[str] = None
+            if scene_xml is not None:
+                resolved_xml = scene_xml
+            elif task is not None:
+                resolved_path = _SCENE_XMLS.get(task)
+                if resolved_path is None:
+                    raise ValueError(
+                        f"Unknown task '{task}'. Available: {sorted(_SCENE_XMLS.keys())}. "
+                        "Use scene_xml to load a custom XML path."
+                    )
+                resolved_xml = str(resolved_path)
+
+            self._env = MuJoCoYAMEnv(
+                config=config,
+                render_cameras=render_cameras,
+                physics_dt=physics_dt,
+                control_decimation=control_decimation,
+                scene_xml=resolved_xml,
+            )
+            self._randomizing_env = False
+
+            if scene_variant is not None:
+                from xdof_sim.scene_variants import apply_scene_variant
+                apply_scene_variant(self._env.model, scene_variant)
+
         self._right_arm_only = right_arm_only
         self._per_arm_dofs = 7  # 6 arm joints + 1 gripper
         self._left_cmd = np.zeros(self._per_arm_dofs, dtype=np.float32)
-
-        if scene_variant is not None:
-            from xdof_sim.scene_variants import apply_scene_variant
-
-            apply_scene_variant(self._env.model, scene_variant)
+        self._viser_port = viser_port
+        self._viser_preview_size = viser_preview_size
+        self._record_camera_size = record_camera_size
+        self._render = render
 
         self._env.reset()
 
@@ -326,11 +360,23 @@ class XdofSimRobot(Robot):
 
         Resets MuJoCo state and refreshes the viser scene.  Clears the flag so
         it returns False on every subsequent call until the button is pressed again.
+        For randomizing envs (e.g. inhand_transfer), the MuJoCo model is reloaded
+        with a new object, so the viser scene is rebuilt from scratch.
         """
         if self._viser is None or not self._viser._reset_requested:
             return False
         self._viser._reset_requested = False
         self._env.reset()
+        if self._randomizing_env:
+            # Model was reloaded — rebuild the viser scene with the new model.
+            self._viser.stop()
+            self._viser = _ViserSceneManager(
+                model=self._env.model,
+                data=self._env.data,
+                port=self._viser_port,
+                record_camera_size=self._record_camera_size,
+                viser_preview_size=self._viser_preview_size,
+            )
         self._viser.update()
         return True
 
