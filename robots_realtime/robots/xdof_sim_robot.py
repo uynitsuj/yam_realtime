@@ -56,18 +56,13 @@ class _ViserSceneManager:
         visible_geom_groups: tuple[int, ...] = (0, 1, 2),
         record_camera_size: int = 480,
         viser_preview_size: int = 244,
-        record_camera_size: int = 480,
-        viser_preview_size: int = 244,
     ) -> None:
         import viser
         import viser.transforms as vtf
         from mujoco import mj_id2name, mjtGeom, mjtObj
-        from mujoco import mj_id2name, mjtGeom, mjtObj
         from xdof_sim.examples.viser_replay import (
             _get_body_name,
-            _get_body_name,
             _is_fixed_body,
-            _merge_geoms,
             _merge_geoms,
         )
 
@@ -284,7 +279,6 @@ class XdofSimRobot(Robot):
         render: Launch the Viser web viewer.
         render_cameras: Whether to render MuJoCo camera observations each
             step for policy observations.  Expensive; disable for teleoperation.
-            step for policy observations.  Expensive; disable for teleoperation.
         physics_dt: MuJoCo physics timestep in seconds.
         control_decimation: Number of physics steps per control step.
             Effective control rate = 1 / (physics_dt x control_decimation).
@@ -303,8 +297,6 @@ class XdofSimRobot(Robot):
         viser_port: Port for the Viser web server.
         viser_camera_size: Resolution (pixels, square) for the streamed
             camera images.  Smaller values reduce websocket bandwidth.
-        viser_camera_size: Resolution (pixels, square) for the streamed
-            camera images.  Smaller values reduce websocket bandwidth.
     """
 
     def __init__(
@@ -318,8 +310,6 @@ class XdofSimRobot(Robot):
         scene_xml: Optional[str] = None,
         scene_variant: Optional[str] = None,
         viser_port: int = 8080,
-        viser_preview_size: int = 244,
-        record_camera_size: int = 864,
         viser_preview_size: int = 244,
         record_camera_size: int = 864,
     ) -> None:
@@ -399,7 +389,6 @@ class XdofSimRobot(Robot):
         state = self._env.get_obs()["state"]  # 14D: [left_7, right_7]
         if self._right_arm_only:
             return state[self._per_arm_dofs :].copy()
-            return state[self._per_arm_dofs :].copy()
         return state.copy()
 
     def command_joint_pos(self, joint_pos: np.ndarray) -> None:
@@ -426,15 +415,8 @@ class XdofSimRobot(Robot):
         state = self._env.get_obs()["state"]  # 14D
         if self._right_arm_only:
             return {"joint_pos": state[self._per_arm_dofs :].copy()}
-            return {"joint_pos": state[self._per_arm_dofs :].copy()}
         return {"joint_pos": state.copy()}
-
-    def get_camera_images(self) -> Dict[str, np.ndarray]:
-        """Return the most recently rendered wrist camera images, or {} if none."""
-        if self._viser is not None:
-            return self._viser.get_camera_images()
-        return {}
-
+        
     def get_camera_images(self) -> Dict[str, np.ndarray]:
         """Return the most recently rendered wrist camera images, or {} if none."""
         if self._viser is not None:

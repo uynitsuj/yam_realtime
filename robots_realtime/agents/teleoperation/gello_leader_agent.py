@@ -11,7 +11,6 @@ from collections import deque
 from typing import Any, Dict, List, Optional
 
 import lerobot.robots  # noqa: F401 — resolve circular import in lerobot
-import lerobot.robots  # noqa: F401 — resolve circular import in lerobot
 import numpy as np
 from dm_env.specs import Array
 from lerobot_teleoperator_yamactiveleader import (
@@ -97,14 +96,11 @@ class GelloLeaderAgent(Agent):
         dagger_debug: bool = False,
         dagger_debug_pose_rad: Optional[List[float]] = False,
         record_on_intervention: bool = False,
-        record_on_intervention: bool = False,
     ) -> None:
         self.robot_name = robot_name
         self.joint_signs = np.array(joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
         self.joint_offsets_deg = np.array(joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
-        self.joint_offsets_deg = np.array(joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
         self.include_gripper = include_gripper
-        self.record_on_intervention = record_on_intervention
         self.record_on_intervention = record_on_intervention
         self._held_action: Optional[Dict[str, Any]] = None
 
@@ -117,18 +113,15 @@ class GelloLeaderAgent(Agent):
         if drive_to_zero:
             self.teleop.drive_to_zero()
             self.teleop.start_arm_hold()
-            self.teleop.start_arm_hold()
 
         if hold_gripper:
             self.teleop.start_gripper_spring()
 
         if dagger_debug:
             pose = np.array(dagger_debug_pose_rad or self.DAGGER_DEBUG_POSE_RAD, dtype=np.float64)
-            pose = np.array(dagger_debug_pose_rad or self.DAGGER_DEBUG_POSE_RAD, dtype=np.float64)
             # Invert agent transform: output_rad = deg2rad(signs * leader_deg + offsets)
             # → leader_deg = (rad2deg(output_rad) - offsets) * signs  (signs are ±1)
             target_deg = (np.rad2deg(pose) - self.joint_offsets_deg) * self.joint_signs
-            target_dict = {f"joint_{i + 1}": float(target_deg[i]) for i in range(NUM_ARM_JOINTS)}
             target_dict = {f"joint_{i + 1}": float(target_deg[i]) for i in range(NUM_ARM_JOINTS)}
             arm_pos = pose[:NUM_ARM_JOINTS].astype(np.float32)
             if include_gripper:
@@ -200,10 +193,6 @@ class GelloLeaderAgent(Agent):
         else:
             pos = joint_rad
 
-        out: Dict[str, Any] = {self.robot_name: {"pos": pos.astype(np.float32)}}
-        if self.record_on_intervention:
-            out["_record"] = bool(self.teleop.is_arm_hold_intervening)
-        return out
         out: Dict[str, Any] = {self.robot_name: {"pos": pos.astype(np.float32)}}
         if self.record_on_intervention:
             out["_record"] = bool(self.teleop.is_arm_hold_intervening)
@@ -444,8 +433,6 @@ class BimanualGelloLeaderAgent(Agent):
         self.right_joint_signs = np.array(right_joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
         self.left_joint_offsets_deg = np.array(left_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
         self.right_joint_offsets_deg = np.array(right_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
-        self.left_joint_offsets_deg = np.array(left_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
-        self.right_joint_offsets_deg = np.array(right_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
 
         left_cfg = YamActiveLeaderTeleoperatorConfig(port=left_port, use_degrees=use_degrees, id=left_id)
         self.left_teleop = YamActiveLeaderTeleoperator(left_cfg)
@@ -495,21 +482,16 @@ class BimanualGelloLeaderAgent(Agent):
     # ------------------------------------------------------------------ #
 
     def _build_pos(
-    def _build_pos(
         self,
-        raw: Dict[str, Any],
         raw: Dict[str, Any],
         signs: np.ndarray,
         offsets_deg: np.ndarray,
     ) -> np.ndarray:
         """Convert a raw teleop action dict to joint_rad [+ gripper]."""
         joint_deg = np.array([raw[f"joint_{i}.pos"] for i in range(1, NUM_ARM_JOINTS + 1)])
-        """Convert a raw teleop action dict to joint_rad [+ gripper]."""
-        joint_deg = np.array([raw[f"joint_{i}.pos"] for i in range(1, NUM_ARM_JOINTS + 1)])
         joint_deg = signs * joint_deg + offsets_deg
         joint_rad = np.deg2rad(joint_deg)
         if self.include_gripper:
-            return np.concatenate([joint_rad, [raw["gripper.pos"]]])
             return np.concatenate([joint_rad, [raw["gripper.pos"]]])
         return joint_rad
 
