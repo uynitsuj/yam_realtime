@@ -1,0 +1,6 @@
+newmtl yellow_cup_mat_0
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+d 1.0
+map_Kd yellow_cup_visual_0.png

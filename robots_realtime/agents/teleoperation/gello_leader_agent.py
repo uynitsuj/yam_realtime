@@ -11,6 +11,7 @@ from collections import deque
 from typing import Any, Dict, List, Optional
 
 import lerobot.robots  # noqa: F401 — resolve circular import in lerobot
+import lerobot.robots  # noqa: F401 — resolve circular import in lerobot
 import numpy as np
 from dm_env.specs import Array
 from lerobot_teleoperator_yamactiveleader import (
@@ -30,6 +31,12 @@ class GelloLeaderAgent(Agent):
 
     Reads the leader's joint positions (in degrees) and converts them
     to radians for output as follower joint-position commands.
+
+    ``act()`` always returns ``{robot_name: {"pos": ...}}``.  When
+    ``record_on_intervention=True`` it additionally emits ``{"_record": bool}``
+    so the control loop can drive a :class:`TrajectoryLogger` without any
+    external trigger — recording starts automatically when the human pushes
+    against the DAgger hold and stops when they release.
 
     ``act()`` always returns ``{robot_name: {"pos": ...}}``.  When
     ``record_on_intervention=True`` it additionally emits ``{"_record": bool}``
@@ -64,6 +71,10 @@ class GelloLeaderAgent(Agent):
             DAgger intervention sensor is active (human pushing against
             the held pose).  Useful for automatically labelling
             corrective demonstrations without any external trigger.
+        record_on_intervention: Emit ``_record=True`` whenever the
+            DAgger intervention sensor is active (human pushing against
+            the held pose).  Useful for automatically labelling
+            corrective demonstrations without any external trigger.
     """
 
     use_joint_state_as_action: bool = False
@@ -86,11 +97,14 @@ class GelloLeaderAgent(Agent):
         dagger_debug: bool = False,
         dagger_debug_pose_rad: Optional[List[float]] = False,
         record_on_intervention: bool = False,
+        record_on_intervention: bool = False,
     ) -> None:
         self.robot_name = robot_name
         self.joint_signs = np.array(joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
         self.joint_offsets_deg = np.array(joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
+        self.joint_offsets_deg = np.array(joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
         self.include_gripper = include_gripper
+        self.record_on_intervention = record_on_intervention
         self.record_on_intervention = record_on_intervention
         self._held_action: Optional[Dict[str, Any]] = None
 
@@ -103,15 +117,18 @@ class GelloLeaderAgent(Agent):
         if drive_to_zero:
             self.teleop.drive_to_zero()
             self.teleop.start_arm_hold()
+            self.teleop.start_arm_hold()
 
         if hold_gripper:
             self.teleop.start_gripper_spring()
 
         if dagger_debug:
             pose = np.array(dagger_debug_pose_rad or self.DAGGER_DEBUG_POSE_RAD, dtype=np.float64)
+            pose = np.array(dagger_debug_pose_rad or self.DAGGER_DEBUG_POSE_RAD, dtype=np.float64)
             # Invert agent transform: output_rad = deg2rad(signs * leader_deg + offsets)
             # → leader_deg = (rad2deg(output_rad) - offsets) * signs  (signs are ±1)
             target_deg = (np.rad2deg(pose) - self.joint_offsets_deg) * self.joint_signs
+            target_dict = {f"joint_{i + 1}": float(target_deg[i]) for i in range(NUM_ARM_JOINTS)}
             target_dict = {f"joint_{i + 1}": float(target_deg[i]) for i in range(NUM_ARM_JOINTS)}
             arm_pos = pose[:NUM_ARM_JOINTS].astype(np.float32)
             if include_gripper:
@@ -183,6 +200,10 @@ class GelloLeaderAgent(Agent):
         else:
             pos = joint_rad
 
+        out: Dict[str, Any] = {self.robot_name: {"pos": pos.astype(np.float32)}}
+        if self.record_on_intervention:
+            out["_record"] = bool(self.teleop.is_arm_hold_intervening)
+        return out
         out: Dict[str, Any] = {self.robot_name: {"pos": pos.astype(np.float32)}}
         if self.record_on_intervention:
             out["_record"] = bool(self.teleop.is_arm_hold_intervening)
@@ -302,6 +323,12 @@ class BimanualGelloLeaderAgent(Agent):
     squeezed past ``gripper_squeeze_threshold``; fully open ≈ 85°, closed ≈ 5°).
     Intervention takes precedence if both flags are set.
 
+    Recording signal — ``act()`` emits ``{"_record": bool}`` alongside the
+    action when ``record_on_intervention=True`` (either arm hold-current
+    intervening) or ``record_on_gripper_squeeze=True`` (both grippers
+    squeezed past ``gripper_squeeze_threshold``; fully open ≈ 85°, closed ≈ 5°).
+    Intervention takes precedence if both flags are set.
+
     Args:
         left_port: Serial port for the left-arm feetech bus.
         right_port: Serial port for the right-arm feetech bus.
@@ -317,6 +344,27 @@ class BimanualGelloLeaderAgent(Agent):
         hold_gripper: Keep gripper torque enabled on both arms.
         include_gripper: Include the gripper value (7th element per arm).
             Defaults to True for bimanual.
+        record_on_intervention: Emit ``_record=True`` whenever either arm's
+            hold-current sensor detects an intervention (OR semantics).
+            Default False.
+        hold_delta_threshold: Raw current delta above baseline required to
+            trigger intervention detection.  Lower = more sensitive.
+            Default 5.0 (library default is 8.0, which is too conservative
+            for arms at rest with 0 baseline current).
+        hold_filter_alpha: EMA smoothing factor for live current readings.
+            Higher = faster response, more noise.  Default 0.3.
+            (Library default is 0.1, which is too slow.)
+        record_on_gripper_squeeze: Emit ``_record=True`` while both grippers
+            are simultaneously squeezed.  Default False.
+        gripper_squeeze_threshold: Raw gripper position (degrees) below which
+            a gripper is considered "squeezed".  Default 60.0.
+        auto_stop_on_static: Override ``_record`` to False when arm joint
+            positions have been essentially static (operator let go) for
+            ``static_frames`` consecutive ticks.  Works with any trigger.
+        static_threshold_rad: Max per-joint delta (rad) per tick below which a
+            frame is considered static.  Default 0.003 rad (~0.17°).
+        static_frames: Consecutive static ticks required before auto-stop.
+            At 30 Hz, 60 frames ≈ 2 s.
         record_on_intervention: Emit ``_record=True`` whenever either arm's
             hold-current sensor detects an intervention (OR semantics).
             Default False.
@@ -381,9 +429,21 @@ class BimanualGelloLeaderAgent(Agent):
         self._static_window: deque = deque(maxlen=static_frames)
         self._last_joint_pos: Optional[np.ndarray] = None
         self._recording_locked = False  # set after auto-stop; cleared by reset()
+        self.record_on_intervention = record_on_intervention
+        self._hold_delta_threshold = hold_delta_threshold
+        self._hold_filter_alpha = hold_filter_alpha
+        self.record_on_gripper_squeeze = record_on_gripper_squeeze
+        self.gripper_squeeze_threshold = gripper_squeeze_threshold
+        self.auto_stop_on_static = auto_stop_on_static
+        self.static_threshold_rad = static_threshold_rad
+        self._static_window: deque = deque(maxlen=static_frames)
+        self._last_joint_pos: Optional[np.ndarray] = None
+        self._recording_locked = False  # set after auto-stop; cleared by reset()
 
         self.left_joint_signs = np.array(left_joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
         self.right_joint_signs = np.array(right_joint_signs or [1] * NUM_ARM_JOINTS, dtype=np.float64)
+        self.left_joint_offsets_deg = np.array(left_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
+        self.right_joint_offsets_deg = np.array(right_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
         self.left_joint_offsets_deg = np.array(left_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
         self.right_joint_offsets_deg = np.array(right_joint_offsets_deg or [0] * NUM_ARM_JOINTS, dtype=np.float64)
 
@@ -435,16 +495,21 @@ class BimanualGelloLeaderAgent(Agent):
     # ------------------------------------------------------------------ #
 
     def _build_pos(
+    def _build_pos(
         self,
+        raw: Dict[str, Any],
         raw: Dict[str, Any],
         signs: np.ndarray,
         offsets_deg: np.ndarray,
     ) -> np.ndarray:
         """Convert a raw teleop action dict to joint_rad [+ gripper]."""
         joint_deg = np.array([raw[f"joint_{i}.pos"] for i in range(1, NUM_ARM_JOINTS + 1)])
+        """Convert a raw teleop action dict to joint_rad [+ gripper]."""
+        joint_deg = np.array([raw[f"joint_{i}.pos"] for i in range(1, NUM_ARM_JOINTS + 1)])
         joint_deg = signs * joint_deg + offsets_deg
         joint_rad = np.deg2rad(joint_deg)
         if self.include_gripper:
+            return np.concatenate([joint_rad, [raw["gripper.pos"]]])
             return np.concatenate([joint_rad, [raw["gripper.pos"]]])
         return joint_rad
 
@@ -556,6 +621,10 @@ class BimanualGelloLeaderAgent(Agent):
         logger.info("BimanualGelloLeaderAgent disconnected.")
 
     def reset(self) -> None:
+        self._recording_locked = False
+        self._static_window.clear()
+        self._last_joint_pos = None
+        logger.info("BimanualGelloLeaderAgent reset — recording re-armed.")
         self._recording_locked = False
         self._static_window.clear()
         self._last_joint_pos = None

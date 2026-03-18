@@ -40,6 +40,8 @@ robots:
     viser_port: 8080
     viser_preview_size: 244   # sidebar preview resolution (lower = less websocket bandwidth)
     record_camera_size: 480   # logged video resolution (independent of preview)
+    viser_preview_size: 244   # sidebar preview resolution (lower = less websocket bandwidth)
+    record_camera_size: 480   # logged video resolution (independent of preview)
 
 agent:
   _target_: robots_realtime.agents.teleoperation.gello_leader_agent.BimanualGelloLeaderAgent

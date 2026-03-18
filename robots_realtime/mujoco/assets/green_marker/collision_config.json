@@ -1,0 +1,20 @@
+{
+  "visual_mesh": "green_marker.obj",
+  "collision_meshes": [
+    "green_marker_collision_0.obj",
+    "green_marker_collision_1.obj",
+    "green_marker_collision_2.obj"
+  ],
+  "visual_submeshes": [
+    {
+      "mesh_file": "green_marker_visual_0.obj",
+      "texture_file": "green_marker_visual_0.png",
+      "material_name": "green_marker_mat_0"
+    }
+  ],
+  "mesh_scale": [
+    0.092,
+    0.091,
+    0.121
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "visual_mesh": "yellow_cup.obj",
+  "collision_meshes": [
+    "yellow_cup_collision_0.obj",
+    "yellow_cup_collision_1.obj",
+    "yellow_cup_collision_2.obj",
+    "yellow_cup_collision_3.obj",
+    "yellow_cup_collision_4.obj",
+    "yellow_cup_collision_5.obj",
+    "yellow_cup_collision_6.obj",
+    "yellow_cup_collision_7.obj",
+    "yellow_cup_collision_8.obj",
+    "yellow_cup_collision_9.obj",
+    "yellow_cup_collision_10.obj",
+    "yellow_cup_collision_11.obj",
+    "yellow_cup_collision_12.obj",
+    "yellow_cup_collision_13.obj",
+    "yellow_cup_collision_14.obj",
+    "yellow_cup_collision_15.obj",
+    "yellow_cup_collision_16.obj",
+    "yellow_cup_collision_17.obj",
+    "yellow_cup_collision_18.obj",
+    "yellow_cup_collision_19.obj",
+    "yellow_cup_collision_20.obj",
+    "yellow_cup_collision_21.obj",
+    "yellow_cup_collision_22.obj",
+    "yellow_cup_collision_23.obj",
+    "yellow_cup_collision_24.obj"
+  ],
+  "visual_submeshes": [
+    {
+      "mesh_file": "yellow_cup_visual_0.obj",
+      "texture_file": "yellow_cup_visual_0.png",
+      "material_name": "yellow_cup_mat_0"
+    }
+  ],
+  "mesh_scale": [
+    0.082,
+    0.076,
+    0.093
+  ]
+}

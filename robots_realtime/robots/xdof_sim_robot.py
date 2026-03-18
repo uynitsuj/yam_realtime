@@ -19,6 +19,12 @@ import os
 # for headless (no-display) rendering instead of GLFW.
 os.environ.setdefault("MUJOCO_GL", "egl")
 
+import os
+
+# Must be set before `import mujoco` so the _render C extension picks up EGL
+# for headless (no-display) rendering instead of GLFW.
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 from typing import Dict, Optional
 
 import mujoco
@@ -36,6 +42,10 @@ class _ViserSceneManager:
     If camera_names is non-empty, a small MuJoCo Renderer renders each named
     camera every tick and streams the result as a live GUI image panel in the
     Viser sidebar (JPEG, camera_render_size × camera_render_size pixels).
+
+    If camera_names is non-empty, a small MuJoCo Renderer renders each named
+    camera every tick and streams the result as a live GUI image panel in the
+    Viser sidebar (JPEG, camera_render_size × camera_render_size pixels).
     """
 
     def __init__(
@@ -46,13 +56,18 @@ class _ViserSceneManager:
         visible_geom_groups: tuple[int, ...] = (0, 1, 2),
         record_camera_size: int = 480,
         viser_preview_size: int = 244,
+        record_camera_size: int = 480,
+        viser_preview_size: int = 244,
     ) -> None:
         import viser
         import viser.transforms as vtf
         from mujoco import mj_id2name, mjtGeom, mjtObj
+        from mujoco import mj_id2name, mjtGeom, mjtObj
         from xdof_sim.examples.viser_replay import (
             _get_body_name,
+            _get_body_name,
             _is_fixed_body,
+            _merge_geoms,
             _merge_geoms,
         )
 
@@ -63,6 +78,41 @@ class _ViserSceneManager:
 
         self.server = viser.ViserServer(port=port)
         print(f"Viser scene viewer: http://localhost:{port}")
+
+        # --- Camera image panels ------------------------------------------
+        # Auto-detect all cameras present in the model.
+        self._cam_names: list[str] = [
+            mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_CAMERA, i) for i in range(model.ncam)
+        ]
+
+        self._cam_renderer: Optional[mujoco.Renderer] = None
+        self._cam_handles: dict[str, viser.GuiImageHandle] = {}
+        self._last_images: dict[str, np.ndarray] = {}  # for data logging
+        self._viser_preview_size = viser_preview_size
+        if self._cam_names:
+            self._cam_renderer = mujoco.Renderer(
+                model,
+                height=record_camera_size,
+                width=record_camera_size,
+            )
+            placeholder = np.zeros((viser_preview_size, viser_preview_size, 3), dtype=np.uint8)
+            with self.server.gui.add_folder("Wrist Cameras"):
+                for name in self._cam_names:
+                    self._cam_handles[name] = self.server.gui.add_image(
+                        placeholder,
+                        label=f"{name} wrist",
+                        format="jpeg",
+                        jpeg_quality=80,
+                    )
+            print(f"  Camera feeds: {self._cam_names} — record {record_camera_size}px, preview {viser_preview_size}px")
+
+        # --- Reset button ----------------------------------------------------
+        self._reset_requested = False
+        reset_btn = self.server.gui.add_button("Reset Environment", color="red")
+
+        @reset_btn.on_click
+        def _(_) -> None:
+            self._reset_requested = True
 
         # --- Camera image panels ------------------------------------------
         # Auto-detect all cameras present in the model.
@@ -147,6 +197,14 @@ class _ViserSceneManager:
                     visible=True,
                 )
                 self._mesh_handles[body_id] = handle
+            elif visual_ids:
+                merged = _merge_geoms(model, visual_ids)
+                handle = self.server.scene.add_mesh_trimesh(
+                    f"/bodies/{body_name}",
+                    merged,
+                    visible=True,
+                )
+                self._mesh_handles[body_id] = handle
 
     def update(self) -> None:
         """Push current body poses from MjData to the viser scene."""
@@ -157,6 +215,27 @@ class _ViserSceneManager:
                 xmat = self._data.xmat[body_id].reshape(3, 3)
                 handle.wxyz = vtf.SO3.from_matrix(xmat).wxyz
             self.server.flush()
+
+        # Render and stream wrist camera images (done outside the atomic block
+        # to avoid holding the lock during the relatively expensive render).
+        if self._cam_renderer is not None:
+            for name in self._cam_names:
+                self._cam_renderer.update_scene(self._data, camera=name)
+                rgb = self._cam_renderer.render()  # (H, W, 3) uint8 at record_camera_size
+                self._last_images[name] = rgb
+                # Downscale for the viser sidebar preview if sizes differ.
+                p = self._viser_preview_size
+                if rgb.shape[0] != p:
+                    import cv2
+
+                    preview = cv2.resize(rgb, (p, p), interpolation=cv2.INTER_LINEAR)
+                else:
+                    preview = rgb
+                self._cam_handles[name].image = preview
+
+    def get_camera_images(self) -> dict[str, np.ndarray]:
+        """Return the most recently rendered camera images (copies)."""
+        return {k: v.copy() for k, v in self._last_images.items()}
 
         # Render and stream wrist camera images (done outside the atomic block
         # to avoid holding the lock during the relatively expensive render).
@@ -205,6 +284,7 @@ class XdofSimRobot(Robot):
         render: Launch the Viser web viewer.
         render_cameras: Whether to render MuJoCo camera observations each
             step for policy observations.  Expensive; disable for teleoperation.
+            step for policy observations.  Expensive; disable for teleoperation.
         physics_dt: MuJoCo physics timestep in seconds.
         control_decimation: Number of physics steps per control step.
             Effective control rate = 1 / (physics_dt x control_decimation).
@@ -223,6 +303,8 @@ class XdofSimRobot(Robot):
         viser_port: Port for the Viser web server.
         viser_camera_size: Resolution (pixels, square) for the streamed
             camera images.  Smaller values reduce websocket bandwidth.
+        viser_camera_size: Resolution (pixels, square) for the streamed
+            camera images.  Smaller values reduce websocket bandwidth.
     """
 
     def __init__(
@@ -236,6 +318,8 @@ class XdofSimRobot(Robot):
         scene_xml: Optional[str] = None,
         scene_variant: Optional[str] = None,
         viser_port: int = 8080,
+        viser_preview_size: int = 244,
+        record_camera_size: int = 864,
         viser_preview_size: int = 244,
         record_camera_size: int = 864,
     ) -> None:
@@ -298,6 +382,8 @@ class XdofSimRobot(Robot):
                 port=viser_port,
                 record_camera_size=record_camera_size,
                 viser_preview_size=viser_preview_size,
+                record_camera_size=record_camera_size,
+                viser_preview_size=viser_preview_size,
             )
             # Push initial pose before the control loop starts
             self._viser.update()
@@ -312,6 +398,7 @@ class XdofSimRobot(Robot):
     def get_joint_pos(self) -> np.ndarray:
         state = self._env.get_obs()["state"]  # 14D: [left_7, right_7]
         if self._right_arm_only:
+            return state[self._per_arm_dofs :].copy()
             return state[self._per_arm_dofs :].copy()
         return state.copy()
 
@@ -339,7 +426,14 @@ class XdofSimRobot(Robot):
         state = self._env.get_obs()["state"]  # 14D
         if self._right_arm_only:
             return {"joint_pos": state[self._per_arm_dofs :].copy()}
+            return {"joint_pos": state[self._per_arm_dofs :].copy()}
         return {"joint_pos": state.copy()}
+
+    def get_camera_images(self) -> Dict[str, np.ndarray]:
+        """Return the most recently rendered wrist camera images, or {} if none."""
+        if self._viser is not None:
+            return self._viser.get_camera_images()
+        return {}
 
     def get_camera_images(self) -> Dict[str, np.ndarray]:
         """Return the most recently rendered wrist camera images, or {} if none."""
