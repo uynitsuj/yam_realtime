@@ -6,6 +6,7 @@ class from the lerobot plugin.
 """
 
 import logging
+import threading
 from collections import deque
 from typing import Any, Dict, List, Optional
 
@@ -203,6 +204,90 @@ class GelloLeaderAgent(Agent):
         pass
 
 
+class _ArmThread:
+    """Runs a YamActiveLeaderTeleoperator at maximum bus frequency in a background thread.
+
+    Calls ``get_action()`` (which includes ``update_gripper_spring`` and
+    ``update_arm_dither``) and ``update_arm_hold()`` as fast as the serial
+    protocol allows.  The main env loop reads the latest buffered action
+    without blocking on bus I/O.
+
+    Commands from the main thread (dither start, hold release) are delivered
+    via simple boolean flags consumed once at the top of each loop iteration.
+    Python's GIL makes single bool writes atomic, so no extra lock is needed
+    for these flags.
+    """
+
+    def __init__(self, teleop: YamActiveLeaderTeleoperator) -> None:
+        self.teleop = teleop
+        self._lock = threading.Lock()
+        self._latest_raw: Dict[str, float] | None = None
+        # Set by the arm thread when hold intervention fires; cleared by main thread.
+        self.intervention_event = threading.Event()
+        # Flags written by the main thread, consumed once by the arm thread.
+        self._pending_dither_start = False
+        self._pending_release = False
+        self._running = False
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name=f"arm-{self.teleop.id}"
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+
+    def _run(self) -> None:
+        while self._running:
+            # Consume pending commands from the main thread.
+            if self._pending_release:
+                self._pending_release = False
+                self.teleop.clear_arm_hold()
+                self.teleop.bus.disable_torque(self.teleop.ARM_MOTORS)
+            if self._pending_dither_start:
+                self._pending_dither_start = False
+                self.teleop.start_arm_dither()
+
+            # Pump arm hold detector; signal main thread on first intervention.
+            if self.teleop.is_arm_hold_active:
+                if self.teleop.update_arm_hold():
+                    self.intervention_event.set()
+
+            # Read action — includes update_gripper_spring + update_arm_dither.
+            try:
+                raw = self.teleop.get_action()
+                with self._lock:
+                    self._latest_raw = raw
+            except Exception as e:
+                logger.warning("ArmThread %s: get_action failed: %s", self.teleop.id, e)
+
+    @property
+    def latest_raw(self) -> Dict[str, float] | None:
+        with self._lock:
+            return self._latest_raw
+
+    @property
+    def is_arm_hold_active(self) -> bool:
+        return self.teleop.is_arm_hold_active
+
+    @property
+    def is_arm_hold_intervening(self) -> bool:
+        return self.teleop.is_arm_hold_intervening
+
+    def request_release(self) -> None:
+        """Signal the arm thread to clear its hold and disable arm torque."""
+        self._pending_release = True
+
+    def request_dither_start(self) -> None:
+        """Signal the arm thread to call start_arm_dither() on the next tick."""
+        self._pending_dither_start = True
+
+
 class BimanualGelloLeaderAgent(Agent):
     """Teleoperation agent backed by two GELLO feetech leader arms (bimanual).
 
@@ -277,8 +362,9 @@ class BimanualGelloLeaderAgent(Agent):
         record_on_gripper_squeeze: bool = False,
         gripper_squeeze_threshold: float = 60.0,
         auto_stop_on_static: bool = False,
-        static_threshold_rad: float = 0.003,
+        static_threshold_rad: float = 0.0025,
         static_frames: int = 60,
+        dither: bool = False,
     ) -> None:
         self.left_id = left_id
         self.right_id = right_id
@@ -319,8 +405,8 @@ class BimanualGelloLeaderAgent(Agent):
                 # can move freely.  start_arm_hold() needs torque active to sense
                 # current — re-enable it by holding the zero config in place.
                 _zero = {f"joint_{i}": 0.0 for i in range(1, NUM_ARM_JOINTS + 1)}
-                self.left_teleop.drive_to_config(_zero, settle_time=0.0)
-                self.right_teleop.drive_to_config(_zero, settle_time=0.0)
+                self.left_teleop.drive_to_config(_zero, settle_time=2.0)
+                self.right_teleop.drive_to_config(_zero, settle_time=2.0)
             self.left_teleop.start_arm_hold(
                 delta_threshold=hold_delta_threshold,
                 filter_alpha=hold_filter_alpha,
@@ -333,6 +419,16 @@ class BimanualGelloLeaderAgent(Agent):
         if hold_gripper:
             self.left_teleop.start_gripper_spring()
             self.right_teleop.start_gripper_spring()
+
+        self._dither_enabled = dither
+        self._dither_started = False
+
+        # Start per-arm background threads — must come after all setup.
+        self._left_arm = _ArmThread(self.left_teleop)
+        self._right_arm = _ArmThread(self.right_teleop)
+        self._left_arm.start()
+        self._right_arm.start()
+        logger.info("BimanualGelloLeaderAgent: arm reader threads started.")
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -361,33 +457,50 @@ class BimanualGelloLeaderAgent(Agent):
 
         Layout: ``[left_j1..6, (left_grip,) right_j1..6, (right_grip,)]``
 
+        Arm hold detection and motor writes run in per-arm background threads
+        at full bus frequency.  This method only reads the latest buffered
+        positions and handles cross-arm coordination.
+
         Returns:
             ``{robot_name: {"pos": np.ndarray}}``
         """
-        # Pump arm hold state so is_arm_hold_intervening is current.
-        # If either arm detects intervention, cross-release the other arm too
-        # so both arms are free to move simultaneously.
-        left_fired = self.left_teleop.is_arm_hold_active and self.left_teleop.update_arm_hold()
-        right_fired = self.right_teleop.is_arm_hold_active and self.right_teleop.update_arm_hold()
-        if left_fired and self.right_teleop.is_arm_hold_active:
-            self.right_teleop.clear_arm_hold()
-            self.right_teleop.bus.disable_torque(self.right_teleop.ARM_MOTORS)
-            logger.info("Left arm intervened — releasing right arm hold torque.")
-        if right_fired and self.left_teleop.is_arm_hold_active:
-            self.left_teleop.clear_arm_hold()
-            self.left_teleop.bus.disable_torque(self.left_teleop.ARM_MOTORS)
-            logger.info("Right arm intervened — releasing left arm hold torque.")
+        # Check for intervention events set by arm threads; handle cross-release.
+        left_fired = self._left_arm.intervention_event.is_set()
+        right_fired = self._right_arm.intervention_event.is_set()
+        if left_fired:
+            self._left_arm.intervention_event.clear()
+            if self._right_arm.is_arm_hold_active:
+                self._right_arm.request_release()
+                logger.info("Left arm intervened — releasing right arm hold torque.")
+        if right_fired:
+            self._right_arm.intervention_event.clear()
+            if self._left_arm.is_arm_hold_active:
+                self._left_arm.request_release()
+                logger.info("Right arm intervened — releasing left arm hold torque.")
 
         logger.debug(
             "Arm hold — left: active=%s intervening=%s | right: active=%s intervening=%s",
-            self.left_teleop.is_arm_hold_active,
-            self.left_teleop.is_arm_hold_intervening,
-            self.right_teleop.is_arm_hold_active,
-            self.right_teleop.is_arm_hold_intervening,
+            self._left_arm.is_arm_hold_active,
+            self._left_arm.is_arm_hold_intervening,
+            self._right_arm.is_arm_hold_active,
+            self._right_arm.is_arm_hold_intervening,
         )
 
-        left_raw = self.left_teleop.get_action()
-        right_raw = self.right_teleop.get_action()
+        # Start dithering on the first tick after both arm holds have released.
+        if self._dither_enabled and not self._dither_started:
+            if not self._left_arm.is_arm_hold_active and not self._right_arm.is_arm_hold_active:
+                self._left_arm.request_dither_start()
+                self._right_arm.request_dither_start()
+                self._dither_started = True
+                logger.info("Arm holds released — dithering started on both arms.")
+
+        # Read the latest buffered actions from the arm threads.
+        left_raw = self._left_arm.latest_raw
+        right_raw = self._right_arm.latest_raw
+        if left_raw is None or right_raw is None:
+            # Threads haven't produced their first reading yet — return zeros.
+            n = NUM_ARM_JOINTS + (1 if self.include_gripper else 0)
+            return {self.robot_name: {"pos": np.zeros(2 * n, dtype=np.float32)}}
 
         left_pos = self._build_pos(left_raw, self.left_joint_signs, self.left_joint_offsets_deg)
         right_pos = self._build_pos(right_raw, self.right_joint_signs, self.right_joint_offsets_deg)
@@ -397,9 +510,7 @@ class BimanualGelloLeaderAgent(Agent):
 
         if not self._recording_locked:
             if self.record_on_intervention:
-                out["_record"] = bool(self.left_teleop.is_arm_hold_intervening) or bool(
-                    self.right_teleop.is_arm_hold_intervening
-                )
+                out["_record"] = self._left_arm.is_arm_hold_intervening or self._right_arm.is_arm_hold_intervening
 
             if self.record_on_gripper_squeeze:
                 left_grip = left_raw.get("gripper.pos", 85.0)
@@ -438,6 +549,8 @@ class BimanualGelloLeaderAgent(Agent):
     # ------------------------------------------------------------------ #
 
     def close(self) -> None:
+        self._left_arm.stop()
+        self._right_arm.stop()
         self.left_teleop.disconnect()
         self.right_teleop.disconnect()
         logger.info("BimanualGelloLeaderAgent disconnected.")

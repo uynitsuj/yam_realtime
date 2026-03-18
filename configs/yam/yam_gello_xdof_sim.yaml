@@ -7,10 +7,16 @@
 # Control rate: physics_dt (0.002s) × control_decimation (17) ≈ 30 Hz.
 # Change control_decimation to 10 for ~50 Hz and update hz accordingly.
 #
-# Scene variants: "eval", "training", "hybrid" (see xdof_sim/scene_variants.py)
+# Scene selection — choose ONE of the following in the robots.right block:
+#   task: "inhand_transfer"  # randomized object + position each reset (InHandTransferEnv)
+#   task: "bottles"          # yam_bimanual_scene.xml
+#   task: "marker"           # yam_marker_scene.xml
+#   task: "dish_brush"       # yam_dish_brush_scene.xml
+#   scene_xml: "/absolute/or/relative/path/to/custom_scene.xml"
 #
 # Visualization uses Viser (browser-based) — no mjpython required on macOS.
 # After launch, open http://localhost:8080 in any browser to view the scene.
+# Press "Reset Environment" in the Viser UI to randomize a new object + position.
 #
 # Usage:
 #   uv run python robots_realtime/envs/launch.py \
@@ -26,10 +32,11 @@ robots:
     right_arm_only: false
     render: true
     render_cameras: false
-    physics_dt: 0.002
-    control_decimation: 17
-    task: "breakfast_setup"
-    scene_variant: "eval"
+    # physics_dt: 0.002
+    # control_decimation: 17
+    # task: "inhand_transfer"
+    task: "bottles"          # alternative: static named scene
+    # scene_xml: "dependencies/xdof-sim/xdof_sim/models/yam_dish_brush_scene.xml"
     viser_port: 8080
     viser_preview_size: 244   # sidebar preview resolution (lower = less websocket bandwidth)
     record_camera_size: 480   # logged video resolution (independent of preview)
@@ -51,6 +58,7 @@ agent:
   right_joint_offsets_deg: [0, 0, 0, 0, 0, 0]
   record_on_intervention: true
   auto_stop_on_static: true
+  dither: true
 
 
 record_path: "../data/trajectories"
