@@ -1,0 +1,39 @@
+version: "1"
+
+session:
+  save_root: recordings
+  auto_record_duration: 10.0
+
+nodes:
+  - type: AgentNode
+    name: gello_left
+    agent_class: robots_realtime.agents.teleoperation.dummy_agent:DummyAgent
+    agent_kwargs:
+      arm: left
+      target_std: 0.3
+      pose_interval: 1.0
+    loop_mode: flat_out
+    publish_freq: 200.0
+
+  - type: AgentNode
+    name: gello_right
+    agent_class: robots_realtime.agents.teleoperation.dummy_agent:DummyAgent
+    agent_kwargs:
+      arm: right
+      target_std: 0.3
+      pose_interval: 1.0
+    loop_mode: flat_out
+    publish_freq: 200.0
+
+  - type: XdofSimNode
+    name: yam
+    scene: hybrid
+    task: bottles
+    physics_dt: 0.0001
+    control_decimation: 17
+    camera_fps: 30.0
+    viser_port: 8765
+    vr_port: 8012
+    cmd_topics:
+      left: gello_left/joint_pos
+      right: gello_right/joint_pos

@@ -1,0 +1,55 @@
+version: "1"
+
+session:
+  save_root: recordings
+  record_topic: gello_left/record
+
+nodes:
+  - type: AgentNode
+    name: gello_left
+    agent_class: robots_realtime.agents.teleoperation.gello_leader_agent:GelloLeaderAgent
+    agent_kwargs:
+      port: /dev/ttyUSB0
+      robot_name: left
+    arm_key: left
+    loop_mode: flat_out
+
+  - type: AgentNode
+    name: gello_right
+    agent_class: robots_realtime.agents.teleoperation.gello_leader_agent:GelloLeaderAgent
+    agent_kwargs:
+      port: /dev/ttyUSB1
+      robot_name: right
+    arm_key: right
+    loop_mode: flat_out
+
+  - type: RobotNode
+    name: yam_left
+    robot_config: robot_configs/yam/left.yaml
+    cmd_topic: gello_left/joint_pos
+
+  - type: RobotNode
+    name: yam_right
+    robot_config: robot_configs/yam/right.yaml
+    cmd_topic: gello_right/joint_pos
+
+  - type: CameraNode
+    name: camera_top
+    driver: ZedCamera
+    device_id: "YOUR_SERIAL"
+    resolution: HD720
+    fps: 30
+
+  - type: CameraNode
+    name: camera_left
+    driver: ZedCamera
+    device_id: "YOUR_SERIAL"
+    resolution: HD720
+    fps: 30
+
+  - type: CameraNode
+    name: camera_right
+    driver: ZedCamera
+    device_id: "YOUR_SERIAL"
+    resolution: HD720
+    fps: 30
