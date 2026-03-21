@@ -179,13 +179,10 @@ class FrankaPyrokiViserAgent(Agent):
                     if self.visualize_rgbd:
                         self.camera_frustum_handles[key].image = resize_with_center_crop(image, 224, 224)
 
-                    # For now these are hardcoded, TODO: Should attach extrinsics files to sensor class obj and pass extr to obs
-
-                    self.camera_frustum_handles[key].position = (1.007, 0, 0.29)
-
-                    self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(
-                        np.pi / 2 - np.pi / 6, np.pi, -np.pi / 2
-                    ).wxyz
+                    extrinsics = obs_copy.get(key, {}).get("extrinsics")
+                    if extrinsics is not None:
+                        self.camera_frustum_handles[key].position = tuple(extrinsics["position"])
+                        self.camera_frustum_handles[key].wxyz = extrinsics["wxyz"]
 
                     if "depth_data" in obs_copy[key] and self.visualize_rgbd:
                         depth_data = obs_copy[key]["depth_data"]

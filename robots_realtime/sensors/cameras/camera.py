@@ -121,7 +121,7 @@ class CameraNode:
 
     def _get_latest_data(self) -> Dict[str, Any]:
         assert self.latest_data is not None, "latest_data should not be None at this point"
-        return dict(
+        result = dict(
             images=self.latest_data.images,
             timestamp=self.latest_data.timestamp,
             depth_data=self.latest_data.depth_data if self.latest_data.depth_data is not None else None,
@@ -129,6 +129,11 @@ class CameraNode:
             if self.camera.intrinsic_data is not None
             else None,
         )
+        # Pass through extrinsics if the camera driver exposes them (e.g. ZedCamera with extrinsics_file set).
+        extrinsics = getattr(self.camera, "extrinsics", None)
+        if extrinsics is not None:
+            result["extrinsics"] = extrinsics
+        return result
 
     @remote(serialization_needed=True)
     def get_camera_info(self) -> Dict[str, Any]:

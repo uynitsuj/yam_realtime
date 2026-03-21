@@ -1,9 +1,12 @@
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 import numpy as np
+import viser.transforms as vtf
+import yaml
 from pyzed import sl
 
 from robots_realtime.sensors.cameras.camera import (
@@ -68,6 +71,7 @@ class ZedCamera(CameraDriver):
     return_right_image: bool = False
     name: str | None = None
     enable_depth: bool = False
+    extrinsics_file: str | None = None  # path to a camera extrinsics YAML (see configs/camera_extrinsics/)
 
     def __repr__(self) -> str:
         return f"ZedCamera(device_id={self.device_id!r}, name={self.name!r}, resolution={self.resolution}, fps={self.fps})"
@@ -134,6 +138,8 @@ class ZedCamera(CameraDriver):
         # Extract and save camera information once
         self.serial_number: int = self.camera_info.serial_number if self.device_id is None else int(self.device_id)
 
+        self.extrinsics: dict | None = self._load_extrinsics() if self.extrinsics_file else None
+
         logging.info(f"Successfully opened ZED camera with parameters: {self}")
 
     def _load_intrinsic_data(self, camera_side: str, raw: bool = False) -> dict:
@@ -150,6 +156,33 @@ class ZedCamera(CameraDriver):
             "distortion_coefficients": list(cam.disto),
             "distortion_model": "zed_rectified",  # Zed gives rectified distortion coefficients
         }
+
+    def _load_extrinsics(self) -> dict | None:
+        """Load camera-to-world extrinsics from a YAML file.
+
+        The YAML must contain:
+            position: [x, y, z]        # metres, in world/base frame
+            rpy_radians: [roll, pitch, yaw]
+
+        Returns a dict with pre-computed ``position`` (np.ndarray), ``wxyz``
+        (quaternion, np.ndarray) and ``pose_mat`` (4x4 SE3, np.ndarray) so
+        callers never need to redo the trigonometry.
+        """
+        path = Path(self.extrinsics_file)
+        if not path.exists():
+            logging.warning(f"ZedCamera: extrinsics file not found: {path}. Extrinsics will be unavailable.")
+            return None
+
+        with open(path) as f:
+            data = yaml.safe_load(f)
+
+        position = np.array(data["position"], dtype=np.float64)
+        rpy = data["rpy_radians"]
+        wxyz = vtf.SO3.from_rpy_radians(*rpy).wxyz
+        pose_mat = vtf.SE3(wxyz_xyz=np.concatenate([wxyz, position])).as_matrix()
+
+        logging.info(f"ZedCamera: loaded extrinsics from {path}")
+        return {"position": position, "wxyz": wxyz, "pose_mat": pose_mat}
 
     def read_depth(self) -> np.ndarray:
         """Read only depth map from ZED camera.

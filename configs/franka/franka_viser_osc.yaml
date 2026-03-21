@@ -10,6 +10,7 @@ sensors:
             fps: 30
             device_id: "35062621"
             enable_depth: true
+            extrinsics_file: "configs/camera_extrinsics/autolab_franka_zed_top.yaml"
 
 robots:
   left: ["robot_configs/franka/franka_default_panda_gripper.yaml"]

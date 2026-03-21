@@ -382,14 +382,13 @@ class FrankaOscClientCartesianAgent(Agent):
     def act(self, obs: Dict[str, Any]) -> Dict[str, Dict[str, np.ndarray]]:
         self.obs = deepcopy(obs)
 
-        # Handle camera extrinsics
-        if "top_camera" in self.obs:
-            self.obs["top_camera"]["pose"] = np.concatenate(
-                [np.array([1.0, 0, 0.29]), vtf.SO3.from_rpy_radians(np.pi / 2 - np.pi / 6, np.pi, -np.pi / 2).wxyz]
-            )
-            self.obs["top_camera"]["pose_mat"] = vtf.SE3(
-                wxyz_xyz=np.concatenate([self.obs["top_camera"]["pose"][3:], self.obs["top_camera"]["pose"][:3]])
-            ).as_matrix()
+        # Populate pose/pose_mat from extrinsics loaded by the camera driver.
+        for cam_key, cam_obs in self.obs.items():
+            if isinstance(cam_obs, dict):
+                extrinsics = cam_obs.get("extrinsics")
+                if extrinsics is not None:
+                    cam_obs["pose"] = np.concatenate([extrinsics["position"], extrinsics["wxyz"]])
+                    cam_obs["pose_mat"] = extrinsics["pose_mat"]
 
         # Get response from msgpack server
         response = self.franka_client.send_request(self.obs)

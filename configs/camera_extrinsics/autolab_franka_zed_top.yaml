@@ -1,0 +1,13 @@
+# Camera extrinsics for the AutoLab Franka setup — overhead ZED camera.
+#
+# All values are expressed in the robot world frame (base link origin).
+#
+# position: [x, y, z] in meters
+# rpy_radians: [roll, pitch, yaw] in radians (applied in that order)
+#
+# For your own setup, create
+# a new file in this directory, then point the ZedCamera config at it via
+# the `extrinsics_file` field.
+
+position: [1.007, 0.0, 0.29]
+rpy_radians: [1.0472, 3.14159, -1.5708]

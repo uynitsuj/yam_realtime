@@ -201,13 +201,10 @@ class FrankaOscClientCartesianAgent(Agent):
                     if self.visualize_rgbd:
                         self.camera_frustum_handles[key].image = resize_with_center_crop(image, 224, 224)
 
-                    # For now these are hardcoded, TODO: Should attach extrinsics files to sensor class obj and pass extr to obs
-
-                    self.camera_frustum_handles[key].position = (1.009, 0, 0.29)
-
-                    self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(
-                        np.pi / 2 - np.pi / 6, np.pi, -np.pi / 2
-                    ).wxyz
+                    extrinsics = obs_copy.get(key, {}).get("extrinsics")
+                    if extrinsics is not None:
+                        self.camera_frustum_handles[key].position = tuple(extrinsics["position"])
+                        self.camera_frustum_handles[key].wxyz = extrinsics["wxyz"]
 
                     if "depth_data" in obs_copy[key] and self.visualize_rgbd:
                         depth_data = obs_copy[key]["depth_data"]
@@ -235,14 +232,13 @@ class FrankaOscClientCartesianAgent(Agent):
     def act(self, obs: Dict[str, Any]) -> Dict[str, Dict[str, np.ndarray]]:
         self.obs = deepcopy(obs)
 
-        # For now camera extrinsics are hardcoded, TODO: Should attach extrinsics files to sensor class obj and pass extr to obs
-        self.obs["top_camera"]["pose"] = np.concatenate(
-            [np.array([1.009, 0, 0.29]), vtf.SO3.from_rpy_radians(np.pi / 2 - np.pi / 6, np.pi, -np.pi / 2).wxyz]
-        )
-        self.obs["top_camera"]["pose_mat"] = vtf.SE3(
-            wxyz_xyz=np.concatenate([self.obs["top_camera"]["pose"][3:], self.obs["top_camera"]["pose"][:3]])
-        ).as_matrix()
-        # self.camera_frustum_handles[key].wxyz = vtf.SO3.from_rpy_radians(np.pi/2 - np.pi/6, np.pi, -np.pi/2).wxyz
+        # Populate pose/pose_mat from extrinsics loaded by the camera driver.
+        for cam_key, cam_obs in self.obs.items():
+            if isinstance(cam_obs, dict):
+                extrinsics = cam_obs.get("extrinsics")
+                if extrinsics is not None:
+                    cam_obs["pose"] = np.concatenate([extrinsics["position"], extrinsics["wxyz"]])
+                    cam_obs["pose_mat"] = extrinsics["pose_mat"]
         response = self.franka_client.send_request(self.obs)
 
         if response.get(b"left") is not None:
