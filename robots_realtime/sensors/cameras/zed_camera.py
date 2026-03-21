@@ -173,7 +173,7 @@ class ZedCamera(CameraDriver):
             logging.warning(f"ZedCamera: extrinsics file not found: {path}. Extrinsics will be unavailable.")
             return None
 
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         position = np.array(data["position"], dtype=np.float64)

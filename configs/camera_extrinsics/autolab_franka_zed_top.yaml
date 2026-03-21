@@ -1,4 +1,4 @@
-# Camera extrinsics for the AutoLab Franka setup — overhead ZED camera.
+# Camera extrinsics for the AutoLab Franka setup - overhead ZED camera.
 #
 # All values are expressed in the robot world frame (base link origin).
 #
