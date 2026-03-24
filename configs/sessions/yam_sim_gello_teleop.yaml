@@ -9,32 +9,28 @@ nodes:
     name: gello_left
     agent_class: robots_realtime.agents.teleoperation.gello_leader_agent:GelloLeaderAgent
     agent_kwargs:
-      port: /dev/ttyUSB0
+      port: /dev/ttyACM0
       robot_name: left
+      include_gripper: true
+      joint_signs: [-1, -1, -1, -1, -1, -1]
     arm_key: left
     loop_mode: flat_out
-    normalize_gripper: true
-    gripper_open_deg: 85.0
-    gripper_closed_deg: 5.0
 
   - type: AgentNode
     name: gello_right
     agent_class: robots_realtime.agents.teleoperation.gello_leader_agent:GelloLeaderAgent
     agent_kwargs:
-      port: /dev/ttyUSB1
+      port: /dev/ttyACM1
       robot_name: right
+      include_gripper: true
+      joint_signs: [-1, -1, -1, -1, -1, -1]
     arm_key: right
     loop_mode: flat_out
-    normalize_gripper: true
-    gripper_open_deg: 85.0
-    gripper_closed_deg: 5.0
 
   - type: XdofSimNode
     name: yam
     scene: hybrid
     task: bottles
-    physics_dt: 0.0001
-    control_decimation: 17
     camera_fps: 30.0
     viser_port: 8765
     vr_port: 8012

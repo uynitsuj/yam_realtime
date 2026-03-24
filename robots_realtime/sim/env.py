@@ -43,8 +43,8 @@ class MuJoCoYAMEnv(gym.Env):
         render_cameras: bool = True,
         camera_height: int = 480,
         camera_width: int = 640,
-        physics_dt: float = 0.0001,
-        control_decimation: int = 17,  # 0.0001 * 17 ≈ 1.7 ms per control step
+        physics_dt: float = 0.002,
+        control_decimation: int = 17,  # 0.002 * 17 ≈ 34 ms per control step ≈ 30 Hz
     ):
         super().__init__()
         self.config = config or default_sim_config()
@@ -66,7 +66,8 @@ class MuJoCoYAMEnv(gym.Env):
 
         self.camera_names = list(self.config.cameras.keys())
         self.robot_names = list(self.config.robots.keys())
-        self.state_dim = 7 * len(self.config.robots)  # 14 for bimanual
+        self.single_timestep_action_dim = 7 * len(self.config.robots)  # 14 for bimanual
+        self.state_dim = self.single_timestep_action_dim  # alias
 
         self.observation_space = spaces.Dict(
             {
@@ -190,10 +191,10 @@ class MuJoCoYAMEnv(gym.Env):
     # Core stepping (also used directly by SimBackend)
     # ------------------------------------------------------------------
 
-    def step_single(self, action_14d: np.ndarray) -> None:
+    def _step_single(self, action_14d: np.ndarray) -> None:
         """Apply a single 14D action and advance physics by control_decimation steps."""
         ctrl = np.zeros(self.model.nu)
-        for i in range(self.state_dim):
+        for i in range(self.single_timestep_action_dim):
             val = float(action_14d[i])
             if i in self._gripper_set:
                 val = val * _GRIPPER_CTRL_MAX
@@ -201,6 +202,10 @@ class MuJoCoYAMEnv(gym.Env):
         self.data.ctrl[:] = ctrl
         for _ in range(self._control_decimation):
             mujoco.mj_step(self.model, self.data)
+
+    def step_single(self, action_14d: np.ndarray) -> None:
+        """Alias for _step_single (backwards compatibility)."""
+        self._step_single(action_14d)
 
     # ------------------------------------------------------------------
     # Observations
@@ -250,12 +255,16 @@ class MuJoCoYAMEnv(gym.Env):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _set_qpos(self, state: np.ndarray) -> None:
+    def _set_qpos_from_state(self, state: np.ndarray) -> None:
         for i, qpos_idx in enumerate(self._qpos_indices):
             val = float(state[i])
             if i in self._gripper_set:
                 val = val * _GRIPPER_CTRL_MAX
             self.data.qpos[qpos_idx] = val
+
+    def _set_qpos(self, state: np.ndarray) -> None:
+        """Alias for _set_qpos_from_state (backwards compatibility)."""
+        self._set_qpos_from_state(state)
 
 
 def _stack_obs(obses: list[dict]) -> dict:

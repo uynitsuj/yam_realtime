@@ -41,6 +41,10 @@ dependencies = [
     "protobuf>=6.33.1",
 ]
 
+[project.scripts]
+rr-session = "robots_realtime.__main__:main"
+rr-replay  = "robots_realtime.cli.replay:main"
+
 [project.optional-dependencies]
 sensors = [
     "pyzed",

@@ -40,8 +40,6 @@ def _make_table(session) -> Table:
 
         hz_val = f"{st.hz:>6.1f}" if st.hz > 0 else Text("  ---", style="dim")
 
-        # topic suffixes from the node definition
-        from robots_realtime.nodes.base import Node  # avoid circular at module level
         topics = ", ".join(st._timestamps.keys()) or "—"
 
         table.add_row(st.name, status_cell, hz_val, topics)
@@ -74,18 +72,66 @@ def _help_line() -> Text:
     return t
 
 
+def _endpoints_text(session) -> Text | None:
+    eps = getattr(session, "web_endpoints", [])
+    if not eps:
+        return None
+    t = Text(style="cyan dim")
+    t.append("  ".join(eps))
+    return t
+
+
+def _tail_file(path: Path, n: int) -> list[str]:
+    """Return the last n lines of a file efficiently."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            if size == 0:
+                return []
+            chunk = min(4096, size)
+            f.seek(-chunk, 2)
+            data = f.read()
+        return data.decode("utf-8", errors="replace").splitlines()[-n:]
+    except Exception:
+        return []
+
+
+def _log_text(log_dir: Path | None, n_lines: int = 8) -> Text:
+    """Tailed log output from all node log files as a single Text block."""
+    if log_dir is None or not log_dir.exists():
+        return Text("")
+
+    all_lines: list[str] = []
+    for lf in sorted(log_dir.glob("*.log")):
+        for line in _tail_file(lf, n_lines):
+            all_lines.append(f"[{lf.stem}] {line}")
+
+    return Text("\n".join(all_lines[-n_lines:]), style="dim", overflow="fold")
+
+
 def _render(session) -> Panel:
     node_table = _make_table(session)
     rec_line   = _recording_line(session)
     help_line  = _help_line()
 
     from rich.rule import Rule
-    from rich import box as rbox
 
     content = Table.grid(expand=True)
     content.add_row(node_table)
+
+    eps_text = _endpoints_text(session)
+    if eps_text is not None:
+        content.add_row(eps_text)
+
     content.add_row(Rule(style="dim"))
     content.add_row(Columns([rec_line, help_line], expand=True))
+
+    log_dir = getattr(session, "log_dir", None)
+    if log_dir is not None:
+        content.add_row(Rule(style="dim"))
+        content.add_row(_log_text(log_dir))
+        content.add_row(Text(f"  logs: {log_dir}", style="dim"))
 
     return Panel(content, title="[bold]robots_realtime[/bold]", border_style="dim")
 
@@ -93,23 +139,20 @@ def _render(session) -> Panel:
 # ── Keyboard reader ───────────────────────────────────────────────────────────
 
 def _read_keys(session, stop_event: threading.Event) -> None:
-    """Read single keypresses from stdin without echoing."""
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        while not stop_event.is_set():
-            if _stdin_ready():
-                ch = sys.stdin.read(1)
-                if ch == "r":
-                    session.toggle_recording()
-                elif ch == "d":
-                    session.end_episode(save=False)
-                elif ch in ("q", "\x03"):  # q or Ctrl-C
-                    stop_event.set()
-                    break
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    """Read single keypresses from stdin without echoing.
+
+    Terminal setup (setcbreak) is owned by run_tui, not here.
+    """
+    while not stop_event.is_set():
+        if _stdin_ready():
+            ch = sys.stdin.read(1)
+            if ch == "r":
+                session.toggle_recording()
+            elif ch == "d":
+                session.end_episode(save=False)
+            elif ch == "q":
+                stop_event.set()
+                break
 
 
 def _stdin_ready() -> bool:
@@ -123,20 +166,32 @@ def run_tui(session, refresh_hz: float = 10.0) -> None:
     """Block and render the TUI until the user quits or session stops."""
     stop_event = threading.Event()
 
-    key_thread = threading.Thread(
-        target=_read_keys, args=(session, stop_event), daemon=True
-    )
-    key_thread.start()
+    # Save terminal settings here in the main thread so the finally block
+    # reliably restores them even if a daemon key thread is killed abruptly.
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    tty.setcbreak(fd)  # single-char reads, no echo, keeps OPOST + ISIG intact
 
-    console = Console()
-    with Live(
-        _render(session),
-        console=console,
-        refresh_per_second=refresh_hz,
-        screen=True,
-    ) as live:
-        while not stop_event.is_set() and not session._stop_event.is_set():
-            live.update(_render(session))
-            time.sleep(1.0 / refresh_hz)
+    try:
+        key_thread = threading.Thread(
+            target=_read_keys, args=(session, stop_event), daemon=True
+        )
+        key_thread.start()
+
+        console = Console()
+        try:
+            with Live(
+                _render(session),
+                console=console,
+                refresh_per_second=refresh_hz,
+                screen=True,
+            ) as live:
+                while not stop_event.is_set() and not session._stop_event.is_set():
+                    live.update(_render(session))
+                    time.sleep(1.0 / refresh_hz)
+        except KeyboardInterrupt:
+            pass
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
     session.stop()

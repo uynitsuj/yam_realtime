@@ -33,11 +33,20 @@ _HZ_WINDOW = 30
 
 
 def _node_descriptor(node) -> dict:
-    return {
+    d: dict = {
         "name": node.name,
         "published_topics": list(getattr(node, "published_topics", [])),
         "subscribed_topics": list(getattr(node, "subscribed_topics", [])),
     }
+    # Include sim node config so replay tools can auto-detect scene/task.
+    sim_cfg: dict = {}
+    if getattr(node, "_scene", None) is not None:
+        sim_cfg["scene"] = node._scene
+    if getattr(node, "_task", None) is not None:
+        sim_cfg["task"] = node._task
+    if sim_cfg:
+        d["sim_config"] = sim_cfg
+    return d
 
 
 @dataclass
@@ -118,6 +127,7 @@ class Session:
         self._stop_event = threading.Event()
         self._prev_record_signal = False
         self._monitor_thread: threading.Thread | None = None
+        self._log_dir: Path | None = None
 
         # Recording state
         self._is_recording: bool = False
@@ -128,11 +138,15 @@ class Session:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def start(self) -> None:
+        import tempfile
+        self._log_dir = Path(tempfile.mkdtemp(prefix="rr_logs_"))
+
         self._bus.start()
         time.sleep(0.1)
 
         for host in self._hosts:
-            host.start()
+            log_path = self._log_dir / f"{host.node_name}.log"
+            host.start(log_path=log_path)
         for host in self._hosts:
             host.send_start()
 
@@ -230,6 +244,17 @@ class Session:
             self.end_episode(save=True)
         else:
             self.start_episode()
+
+    @property
+    def log_dir(self) -> Path | None:
+        return self._log_dir
+
+    @property
+    def web_endpoints(self) -> list[str]:
+        urls = []
+        for host in self._hosts:
+            urls.extend(host._node.web_endpoints)
+        return urls
 
     # ── Status ────────────────────────────────────────────────────────────────
 

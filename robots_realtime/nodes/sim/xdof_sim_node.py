@@ -97,7 +97,7 @@ class _VrStreamer:
         import shutil
         from pathlib import Path
         from scipy.spatial.transform import Rotation
-        from xdof_sim.examples.vr_streamer import VR_HTML, export_body_glbs
+        from robots_realtime.nodes.sim._mujoco_viser import VR_HTML, export_body_glbs
 
         self._data = data
         self._port = port
@@ -269,7 +269,7 @@ class _ViserSceneManager:
         import viser
         import viser.transforms as vtf
         from mujoco import mj_id2name, mjtGeom, mjtObj
-        from xdof_sim.examples.viser_replay import (
+        from robots_realtime.nodes.sim._mujoco_viser import (
             _get_body_name,
             _is_fixed_body,
             _merge_geoms,
@@ -614,29 +614,43 @@ class XdofSimNode(Node):
         # 3. Step physics
         with self._cmd_lock:
             cmd_snapshot = self._cmd.copy()
-        self._env.step_single(cmd_snapshot)
+        self._env._step_single(cmd_snapshot)
 
-        # 4. Publish state + viser pose update at ~30 Hz
+        # 4. Record sim state at every physics step
         now = time.time()
-        if now - self._last_obs_ts >= self._obs_interval:
-            self._last_obs_ts = now
+        if self._recording:
             state = self._read_joint_state()
             left_state = state[:_DOFS_PER_ARM].tolist()
             right_state = state[_DOFS_PER_ARM:].tolist()
+            if self._left_writer is not None and self._left_writer.is_open:
+                self._left_writer.write("joint_state", now, {"joint_pos": left_state})
+            if self._right_writer is not None and self._right_writer.is_open:
+                self._right_writer.write("joint_state", now, {"joint_pos": right_state})
+            if self._sim_state_writer is not None and self._sim_state_writer.is_open:
+                self._sim_state_writer.write("sim_qpos", now, {"qpos": self._env.data.qpos.copy().tolist()})
+
+        # 5. Publish state + viser pose update at ~30 Hz
+        if now - self._last_obs_ts >= self._obs_interval:
+            self._last_obs_ts = now
+            if not self._recording:
+                state = self._read_joint_state()
+                left_state = state[:_DOFS_PER_ARM].tolist()
+                right_state = state[_DOFS_PER_ARM:].tolist()
 
             self.publish("left_state", {"joint_pos": left_state}, ts=now)
             self.publish("right_state", {"joint_pos": right_state}, ts=now)
 
-            if self._recording:
-                if self._left_writer is not None and self._left_writer.is_open:
-                    self._left_writer.write("joint_state", now, {"joint_pos": left_state})
-                if self._right_writer is not None and self._right_writer.is_open:
-                    self._right_writer.write("joint_state", now, {"joint_pos": right_state})
-                if self._sim_state_writer is not None and self._sim_state_writer.is_open:
-                    self._sim_state_writer.write("sim_qpos", now, {"qpos": self._env.data.qpos.copy().tolist()})
-
             if self._viser is not None:
                 self._viser.update_poses_only()
+
+    @property
+    def web_endpoints(self) -> list[str]:
+        urls = []
+        if self._viser_port is not None:
+            urls.append(f"http://localhost:{self._viser_port}  (viser)")
+        if self._vr_port is not None:
+            urls.append(f"http://localhost:{self._vr_port}  (vr)")
+        return urls
 
     def cleanup(self) -> None:
         if self._render_stop is not None:
@@ -701,7 +715,7 @@ class XdofSimNode(Node):
 
     def _read_joint_state(self) -> np.ndarray:
         env = self._env
-        dim = env.state_dim
+        dim = env.single_timestep_action_dim
         state = np.zeros(dim, dtype=np.float32)
         for i, qpos_idx in enumerate(env._qpos_indices):
             val = float(env.data.qpos[qpos_idx])

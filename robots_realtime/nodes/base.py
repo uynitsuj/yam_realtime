@@ -14,10 +14,13 @@ handles START_RECORDING / STOP_RECORDING while node.run() is executing.
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
 from enum import Enum, auto
+from pathlib import Path
 
 import zmq
 
@@ -100,6 +103,11 @@ class Node(ABC):
 
     def cleanup(self) -> None:
         """Release hardware handles.  Called after the loop exits."""
+
+    @property
+    def web_endpoints(self) -> list[str]:
+        """Return human-readable localhost URLs this node exposes (e.g. viser)."""
+        return []
 
     # ------------------------------------------------------------------
     # Recording
@@ -227,6 +235,7 @@ def _host_worker(
     node: Node,
     ctrl_addr: str,
     ready_event: mp.Event,
+    log_path: Path | None = None,
 ) -> None:
     """Entry point for the subprocess spawned by ProcessHost.
 
@@ -237,6 +246,16 @@ def _host_worker(
         START_RECORDING:<d> — call node.start_recording(d)
         STOP_RECORDING      — call node.stop_recording()
     """
+    # Detach from the parent's terminal: redirect stdin so that
+    # libraries using input() / readline don't get the TUI's setcbreak stdin.
+    sys.stdin = open(os.devnull, "r")
+
+    if log_path is not None:
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        _log_file = open(log_path, "w", buffering=1)
+        sys.stdout = _log_file
+        sys.stderr = _log_file
+
     ctx = zmq.Context()
     ctrl = ctx.socket(zmq.REP)
     ctrl.bind(ctrl_addr)
@@ -317,12 +336,12 @@ class ProcessHost:
         self._ctx = zmq.Context.instance()
         self._ctrl: zmq.Socket | None = None
 
-    def start(self, timeout: float = 10.0) -> None:
+    def start(self, timeout: float = 10.0, log_path: Path | None = None) -> None:
         """Spawn subprocess and wait until its control socket is bound."""
         ready = mp.Event()
         self._proc = mp.Process(
             target=_host_worker,
-            args=(self._node, self._ctrl_addr, ready),
+            args=(self._node, self._ctrl_addr, ready, log_path),
             daemon=True,
             name=f"Node-{self._node.name}",
         )

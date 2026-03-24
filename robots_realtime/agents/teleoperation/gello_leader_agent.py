@@ -86,6 +86,7 @@ class GelloLeaderAgent(Agent):
         self,
         port: str = "/dev/tty.usbmodem5AE60805531",
         robot_name: str = "left",
+        device_id: str = "",
         calibrate: bool = True,
         joint_signs: Optional[List[int]] = None,
         joint_offsets_deg: Optional[List[float]] = None,
@@ -93,6 +94,7 @@ class GelloLeaderAgent(Agent):
         drive_to_zero: bool = True,
         hold_gripper: bool = True,
         include_gripper: bool = False,
+        dither: bool = True,
         dagger_debug: bool = False,
         dagger_debug_pose_rad: Optional[List[float]] = False,
         record_on_intervention: bool = False,
@@ -104,10 +106,36 @@ class GelloLeaderAgent(Agent):
         self.record_on_intervention = record_on_intervention
         self._held_action: Optional[Dict[str, Any]] = None
 
-        config = YamActiveLeaderTeleoperatorConfig(port=port, use_degrees=use_degrees)
+        # device_id determines the calibration file name; fall back to robot_name
+        # so a device named "left" automatically picks up left.json.
+        effective_id = device_id or robot_name
+        config = YamActiveLeaderTeleoperatorConfig(port=port, use_degrees=use_degrees, id=effective_id)
         self.teleop = YamActiveLeaderTeleoperator(config)
-        self.teleop.connect(calibrate=calibrate)
-        logger.info("GelloLeaderAgent connected to %s", port)
+
+        # Calibration requires interactive stdin — not available in a subprocess.
+        # Require a pre-existing calibration file; monkey-patch builtins.input to
+        # return "" (= keep existing calibration) for the duration of connect().
+        # First-time setup: lerobot-calibrate --teleop.type=yam_active_leader
+        #                   --teleop.port=<port> --teleop.id=<robot_name>
+        if calibrate:
+            calib_path = getattr(self.teleop, "calibration_fpath", None)
+            if calib_path is None or not calib_path.is_file():
+                raise RuntimeError(
+                    f"No calibration file found for GELLO '{effective_id}'.\n"
+                    f"Expected: {calib_path}\n"
+                    f"Run:  lerobot-calibrate --teleop.type=yam_active_leader"
+                    f" --teleop.port={port} --teleop.id={effective_id}"
+                )
+            logger.info("[%s] using calibration file: %s", effective_id, calib_path)
+
+        import builtins
+        _orig_input = builtins.input
+        builtins.input = lambda *_a, **_kw: ""
+        try:
+            self.teleop.connect(calibrate=calibrate)
+        finally:
+            builtins.input = _orig_input
+        logger.info("GelloLeaderAgent connected to %s (id=%s)", port, effective_id)
 
         # ---- Active motor control at startup ---- #
         if drive_to_zero:
@@ -116,6 +144,9 @@ class GelloLeaderAgent(Agent):
 
         if hold_gripper:
             self.teleop.start_gripper_spring()
+
+        if dither:
+            self.teleop.start_arm_dither()
 
         if dagger_debug:
             pose = np.array(dagger_debug_pose_rad or self.DAGGER_DEBUG_POSE_RAD, dtype=np.float64)
@@ -167,7 +198,10 @@ class GelloLeaderAgent(Agent):
             *include_gripper* is True).
         """
         # --- Hold mode: return held config and monitor for intervention ---
-        if self.teleop.is_arm_hold_active:
+        # Only active when _held_action was explicitly set (dagger_debug mode).
+        # During normal teleop, start_arm_hold() runs on the device but we
+        # still return live joint positions.
+        if self.teleop.is_arm_hold_active and self._held_action is not None:
             self.teleop.update_arm_hold()
             if not self.teleop.is_arm_hold_intervening:
                 return self._held_action

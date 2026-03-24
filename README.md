@@ -104,22 +104,41 @@ uv pip install -e .
 
 ---
 
-## Running a session
+## CLI commands
 
-Sessions are defined in YAML and launched with:
+After `uv sync` / `uv pip install -e .` two commands are available via `uv run`:
+
+| Command | Description |
+|---------|-------------|
+| `uv run rr-session <config.yaml>` | Launch a session from a YAML config |
+| `uv run rr-replay <episode_dir>` | Replay a recorded sim episode in Viser |
+
+Alternatively, activate the venv once (`source .venv/bin/activate`) and omit the `uv run` prefix.
+
+### Running a session
 
 ```bash
-uv run python -m robots_realtime configs/sessions/<config>.yaml
+uv run rr-session configs/sessions/yam_sim_gello_teleop.yaml
 ```
 
-Add `--no-tui` to suppress the Rich TUI (useful for headless / scripted runs).
+### Replaying an episode
+
+```bash
+uv run rr-replay recordings/20260323/episode_175805_0473b1bc/
+uv run rr-replay recordings/20260323/episode_175805_0473b1bc/ --port 8080 --speed 2.0
+```
+
+Opens a Viser browser viewer at `http://localhost:8080`. Two replay modes are available (selectable in the UI):
+
+- **qpos** — directly restores the recorded MuJoCo qpos at each step (exact replay, requires `yam-sim_state.mcap`)
+- **physics** — feeds the recorded gello actions back through the simulator (re-simulation)
 
 ### Provided configs
 
 | Config | Description |
 |--------|-------------|
 | `yam_sim_dummy.yaml` | Two synthetic agents → MuJoCo sim. No hardware needed. Good for testing. |
-| `yam_sim_gello_teleop.yaml` | Two physical GELLO arms → MuJoCo sim |
+| `yam_sim_gello_teleop.yaml` | Two physical GELLO arms → MuJoCo sim + live Viser viewer |
 | `yam_bimanual_gello_teleop.yaml` | Two physical GELLO arms → two physical YAM arms + cameras |
 | `franka_viser_teleop.yaml` | Browser IK gizmo → Franka Panda + camera |
 
