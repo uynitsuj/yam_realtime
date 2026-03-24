@@ -33,10 +33,11 @@ from typing import Any
 # ── Node registry ─────────────────────────────────────────────────────────────
 
 _NODE_REGISTRY: dict[str, str] = {
-    "AgentNode":   "robots_realtime.nodes.agent_node:AgentNode",
-    "RobotNode":   "robots_realtime.nodes.environment.robot_node:RobotNode",
-    "CameraNode":  "robots_realtime.nodes.environment.camera_node:CameraNode",
-    "XdofSimNode": "robots_realtime.nodes.sim.xdof_sim_node:XdofSimNode",
+    "AgentNode":        "robots_realtime.nodes.agent_node:AgentNode",
+    "RobotNode":        "robots_realtime.nodes.environment.robot_node:RobotNode",
+    "CameraNode":       "robots_realtime.nodes.environment.camera_node:CameraNode",
+    "XdofSimNode":      "robots_realtime.nodes.sim.xdof_sim_node:XdofSimNode",
+    "ViserTeleopNode":  "robots_realtime.nodes.viser_teleop_node:ViserTeleopNode",
 }
 
 

@@ -10,6 +10,7 @@ nodes:
     agent_kwargs:
       viser_port: 8765
       ik_rate: 100.0
+      robotiq_gripper: true
     arm_key: left
     ik_freq: 100.0
     viz_freq: 20.0
@@ -20,12 +21,14 @@ nodes:
 
   - type: RobotNode
     name: franka
-    robot_config: robot_configs/franka/franka_no_gripper.yaml
+    robot_config: robot_configs/franka/franka_robotiq_gripper.yaml
     cmd_topic: franka_viser/joint_pos
 
   - type: CameraNode
     name: camera_top
     driver: ZedCamera
-    device_id: "YOUR_SERIAL"
+    device_id: "35062621"
     resolution: HD720
     fps: 30
+    enable_depth: true
+    extrinsics_file: configs/camera_extrinsics/autolab_franka_zed_top.yaml

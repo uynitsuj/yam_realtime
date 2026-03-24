@@ -110,7 +110,7 @@ def _log_text(log_dir: Path | None, n_lines: int = 8) -> Text:
     return Text("\n".join(all_lines[-n_lines:]), style="dim", overflow="fold")
 
 
-def _render(session) -> Panel:
+def _render(session, n_log_lines: int = 8) -> Panel:
     node_table = _make_table(session)
     rec_line   = _recording_line(session)
     help_line  = _help_line()
@@ -130,7 +130,7 @@ def _render(session) -> Panel:
     log_dir = getattr(session, "log_dir", None)
     if log_dir is not None:
         content.add_row(Rule(style="dim"))
-        content.add_row(_log_text(log_dir))
+        content.add_row(_log_text(log_dir, n_lines=n_log_lines))
         content.add_row(Text(f"  logs: {log_dir}", style="dim"))
 
     return Panel(content, title="[bold]robots_realtime[/bold]", border_style="dim")
@@ -187,7 +187,9 @@ def run_tui(session, refresh_hz: float = 10.0) -> None:
                 screen=True,
             ) as live:
                 while not stop_event.is_set() and not session._stop_event.is_set():
-                    live.update(_render(session))
+                    # Reserve ~10 lines for the table / chrome above the log panel.
+                    n_log = max(4, console.height - 12)
+                    live.update(_render(session, n_log_lines=n_log))
                     time.sleep(1.0 / refresh_hz)
         except KeyboardInterrupt:
             pass

@@ -12,6 +12,7 @@ For building YAM active leader arms: [lerobot_teleoperator_yamactiveleader](http
 
 ## Misc. Documentation
 [Architecture & recording format](docs/architecture.md) 
+
 [Extending (new agents, robots, cameras)](docs/extending.md)
 
 
@@ -46,7 +47,6 @@ uv run rr-session configs/sessions/yam_sim_gello_teleop.yaml
 
 ```bash
 uv run rr-replay recordings/20260323/episode_175805_0473b1bc/
-uv run rr-replay <episode_dir> --port 8080 --speed 2.0
 ```
 
 Opens a Viser viewer at `http://localhost:8080`. Two modes: **qpos** (exact, restores recorded state) and **physics** (re-simulates from actions).

@@ -40,6 +40,9 @@ class FrankaOscClientCartesianAgent(Agent):
         ik_rate: float = 100.0,
         visualize_rgbd: bool = False,
         robotiq_gripper: bool = False,
+        viser_port: int = 8080,
+        client_host: str = "0.0.0.0",
+        client_port: int = 9000,
     ) -> None:
         self.bimanual = bimanual
         self.robotiq_gripper = robotiq_gripper
@@ -53,7 +56,7 @@ class FrankaOscClientCartesianAgent(Agent):
         self.hyrl_joint_pos = None
         self.hyrl_gripper_pos = None
 
-        self.viser_server = viser.ViserServer()
+        self.viser_server = viser.ViserServer(port=viser_port)
         self.ik = FrankaPyroki(
             rate=ik_rate,
             viser_server=self.viser_server,
@@ -70,15 +73,15 @@ class FrankaOscClientCartesianAgent(Agent):
             ).wxyz
             self.ik.transform_handles.get("left").tcp_offset_frame.position = (0.0, 0.0, -0.157)
 
-        self.franka_client = SyncMsgpackNumpyClient(host="0.0.0.0", port=9000)
+        self.franka_client = SyncMsgpackNumpyClient(host=client_host, port=client_port)
 
         self.obs: Optional[Dict[str, Any]] = None
         self._update_period = 0.05
         self._setup_visualization()
 
-        # self.real_vis_thread = threading.Thread(target=self._update_visualization, name="franka_real_vis")
-        # self.real_vis_thread.daemon = True
-        # self.real_vis_thread.start()
+        self.real_vis_thread = threading.Thread(target=self._update_visualization, name="franka_real_vis")
+        self.real_vis_thread.daemon = True
+        self.real_vis_thread.start()
 
     # ------------------------------------------------------------------
     # Visualization helpers
@@ -239,6 +242,12 @@ class FrankaOscClientCartesianAgent(Agent):
                 if extrinsics is not None:
                     cam_obs["pose"] = np.concatenate([extrinsics["position"], extrinsics["wxyz"]])
                     cam_obs["pose_mat"] = extrinsics["pose_mat"]
+        # DEBUG: print top-level keys and camera structure before sending
+        print(f"[DEBUG msgpack] top-level keys: {list(self.obs.keys())}")
+        for k, v in self.obs.items():
+            if isinstance(v, dict):
+                img_keys = list(v.get("images", {}).keys()) if "images" in v else None
+                print(f"  [{k}] keys={list(v.keys())} images={img_keys}")
         response = self.franka_client.send_request(self.obs)
 
         if response.get(b"left") is not None:

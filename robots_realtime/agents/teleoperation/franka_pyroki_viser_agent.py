@@ -39,6 +39,7 @@ class FrankaPyrokiViserAgent(Agent):
         ik_rate: float = 100.0,
         visualize_rgbd: bool = True,
         robotiq_gripper: bool = False,
+        viser_port: int = 8080,
     ) -> None:
         self.bimanual = bimanual
         self.right_arm_extrinsic = right_arm_extrinsic
@@ -49,7 +50,7 @@ class FrankaPyrokiViserAgent(Agent):
                 "right_arm_extrinsic must be provided for bimanual Franka configuration"
             )
 
-        self.viser_server = viser.ViserServer()
+        self.viser_server = viser.ViserServer(port=viser_port)
         self.ik = FrankaPyroki(
             rate=ik_rate,
             viser_server=self.viser_server,

@@ -15,11 +15,36 @@ Subscribed topics (configured at construction):
 
 from __future__ import annotations
 
+import importlib
 import time
 
 import numpy as np
+import yaml as _yaml
 
 from robots_realtime.nodes.base import Node, NodeRole
+
+
+def _resolve(obj):
+    """Recursively instantiate any dict containing a ``_target_`` key."""
+    if isinstance(obj, dict):
+        if "_target_" in obj:
+            obj = dict(obj)
+            target: str = obj.pop("_target_")
+            kwargs = {k: _resolve(v) for k, v in obj.items()}
+            module_path, cls_name = target.rsplit(".", 1)
+            mod = importlib.import_module(module_path)
+            return getattr(mod, cls_name)(**kwargs)
+        return {k: _resolve(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve(item) for item in obj]
+    return obj
+
+
+def _instantiate_from_target_yaml(config_path: str):
+    """Load a YAML config and recursively instantiate all ``_target_`` objects."""
+    with open(config_path) as f:
+        cfg = _yaml.safe_load(f)
+    return _resolve(cfg)
 
 
 class RobotNode(Node):
@@ -61,10 +86,12 @@ class RobotNode(Node):
 
     def setup(self) -> None:
         if self._robot is None:
-            raise RuntimeError(
-                f"[{self.name}] RobotNode.robot is None — inject a robot driver before starting. "
-                f"(robot_config={self._robot_config!r})"
-            )
+            if self._robot_config is None:
+                raise RuntimeError(
+                    f"[{self.name}] RobotNode.robot is None — inject a robot driver before starting. "
+                    f"(robot_config={self._robot_config!r})"
+                )
+            self._robot = _instantiate_from_target_yaml(self._robot_config)
 
     def step(self) -> None:
         ts = time.time()
