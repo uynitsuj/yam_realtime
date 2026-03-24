@@ -29,11 +29,10 @@ uv venv --python 3.11 && uv pip install -e .
 
 ## Usage
 
-### Run a session
+### Run a session (Teleop Data Collection)
 
 ```bash
 uv run rr-session configs/sessions/yam_sim_gello_teleop.yaml
-uv run rr-session configs/sessions/yam_sim_gello_teleop.yaml --no-tui
 ```
 
 | Config | Description |
