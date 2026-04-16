@@ -2677,6 +2677,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyrealsense2"
+version = "2.57.7.10387"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/61/1d4db107c791c89b3b231d2050ff3667b6a72979bd5dfb7a9b2a2fa2dcb2/pyrealsense2-2.57.7.10387-cp311-cp311-manylinux1_x86_64.whl", hash = "sha256:3f95183e07b964c86794e508ec82c82700ae597acbf0751083f7a387a490eb1c", size = 11616809, upload-time = "2026-03-25T11:36:52.472Z" },
+    { url = "https://files.pythonhosted.org/packages/15/c8/a7a8eec5a20829d7f05727e238e3423ffe15aeda69bf0c639742a7f3dad0/pyrealsense2-2.57.7.10387-cp311-cp311-win_amd64.whl", hash = "sha256:7f72715ea8bb30c218c5cfc40c69c7b1cc079ac267f472c98166502a193af254", size = 8125024, upload-time = "2026-03-25T11:37:11.982Z" },
+]
+
+[[package]]
 name = "pyroki"
 version = "0.0.0"
 source = { git = "https://github.com/chungmin99/pyroki.git?rev=59aa21f#59aa21ffc766533c66d22ff38dd6717e176f19c8" }
@@ -3017,6 +3026,9 @@ franka-panda = [
 mjlab-sim = [
     { name = "mjlab" },
 ]
+realsense = [
+    { name = "pyrealsense2" },
+]
 sensors = [
     { name = "pyzed" },
 ]
@@ -3054,6 +3066,7 @@ requires-dist = [
     { name = "panda-python", marker = "extra == 'franka-panda'", path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_python-0.7.5+libfranka.0.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" },
     { name = "portal" },
     { name = "protobuf", specifier = ">=6.33.1" },
+    { name = "pyrealsense2", marker = "extra == 'realsense'", specifier = ">=2.55" },
     { name = "pyroki", git = "https://github.com/chungmin99/pyroki.git?rev=59aa21f" },
     { name = "python-can", specifier = ">=4.3.0" },
     { name = "pyzed", marker = "extra == 'sensors'", path = "dependencies/pyzed-5.1-cp311-cp311-linux_x86_64.whl" },
@@ -3066,7 +3079,7 @@ requires-dist = [
     { name = "xdof-sdk" },
     { name = "yourdfpy" },
 ]
-provides-extras = ["sensors", "franka-panda", "mjlab-sim", "sim"]
+provides-extras = ["sensors", "realsense", "franka-panda", "mjlab-sim", "sim"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff", specifier = ">=0.12.3" }]

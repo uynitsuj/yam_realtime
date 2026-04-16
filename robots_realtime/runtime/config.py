@@ -38,6 +38,7 @@ _NODE_REGISTRY: dict[str, str] = {
     "CameraNode":       "robots_realtime.runtime.environment.camera_node:CameraNode",
     "XdofSimNode":      "robots_realtime.runtime.sim.xdof_sim_node:XdofSimNode",
     "ViserTeleopNode":  "robots_realtime.runtime.viser_teleop_node:ViserTeleopNode",
+    "ViserMonitorNode": "robots_realtime.runtime.viser_monitor_node:ViserMonitorNode",
 }
 
 

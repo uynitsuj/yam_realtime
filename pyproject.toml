@@ -49,6 +49,9 @@ rr-replay  = "robots_realtime.rr_replay_cli:main"
 sensors = [
     "pyzed",
 ]
+realsense = [
+    "pyrealsense2>=2.55",
+]
 franka_panda = [
     "panda_python",
 ]
