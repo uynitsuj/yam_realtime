@@ -84,21 +84,30 @@ nodes:
     name: viz
     port: 8080
     viz_freq: 20
-    preview_size: [240, 180]                   # [width, height] for camera panels
     auto_open_browser: true
     fullscreen: true
     up_axis: "+z"
-    initial_camera_position: [-0.7, -0.3, 0.6]  # behind the arms, slightly elevated
-    initial_camera_look_at:  [0.45, -0.3, 0.3]  # workspace centre between the two bases
+    initial_camera_position: [-0.7, -0.31, 0.3]  # behind the arms, slightly elevated
+    initial_camera_look_at:  [0.45, -0.31, 0.3]  # workspace centre between the two bases
     urdfs:
       yam_left:
         path: dependencies/i2rt/i2rt/robot_models/arm/yam/yam.urdf
         state_topic: yam_left/joint_state
         flip_joints: true
+        gripper:
+          type: linear_4310             # one of: linear_4310, (more to add as needed)
+          attach_link: link_6           # last arm link in the URDF
+          # If the gripper appears rotated/offset relative to the real arm,
+          # uncomment and tweak these (transform from URDF link_6 → gripper body).
+          # body_offset_pos:       [0.0, 0.0, 0.0]
+          # body_offset_quat_wxyz: [0.0, 0.0, 0.0, 1.0]   # 180° about Z = joint6 axis
       yam_right:
         path: dependencies/i2rt/i2rt/robot_models/arm/yam/yam.urdf
         state_topic: yam_right/joint_state
         flip_joints: true
+        gripper:
+          type: linear_4310
+          attach_link: link_6
         extrinsic:
           position: [0.0, -0.61, 0.0]     # shift right-arm overlay 0.5 m in +y
           rotation: [1.0, 0.0, 0.0, 0.0] # wxyz identity

@@ -62,6 +62,54 @@ from robots_realtime.sensors.cameras.camera_utils import resize_with_pad
 logger = logging.getLogger(__name__)
 
 
+# Gripper presets — poses and mesh paths scraped from the i2rt MJCF files.
+# We render three static sub-meshes (shell + two tips) attached to the arm's
+# attach_link. The two tips each sit inside a sub-frame whose position is
+# updated each step from the bus message's ``gripper_pos`` (normalized [0, 1]
+# where 0 = closed, 1 = open per i2rt's JointMapper convention).
+#
+# To add a new gripper type, scrape the same fields from its MJCF file in
+# dependencies/i2rt/i2rt/robot_models/gripper/<type>/<type>.xml.
+_GRIPPER_I2RT_ROOT = "dependencies/i2rt/i2rt/robot_models/gripper"
+
+GRIPPER_PRESETS: dict[str, dict] = {
+    "linear_4310": {
+        "shell_stl":        f"{_GRIPPER_I2RT_ROOT}/linear_4310/assets/gripper.stl",
+        "tip_left_stl":     f"{_GRIPPER_I2RT_ROOT}/linear_4310/assets/tip_left.stl",
+        "tip_right_stl":    f"{_GRIPPER_I2RT_ROOT}/linear_4310/assets/tip_right.stl",
+        # Gripper-body frame pose relative to the arm's attach_link (URDF link_6).
+        #
+        # There's no clean algebraic derivation because the arm MJCF and arm URDF
+        # disagree on link_6's orientation — URDF has joint6 rpy=(-π/2, 0, 0),
+        # MJCF uses a 120° off-axis quat. The combine_arm_and_gripper_xml pipeline
+        # doesn't apply to URDF-based rendering. So these defaults are
+        # empirical: 180° about the joint6 axis (local Z) with zero offset.
+        # Tune `body_offset_pos` and `body_offset_quat_wxyz` from YAML per arm
+        # to dial in the final visual match.
+        "body_offset_pos":        (0.0, 0.0, 0.0),
+        "body_offset_quat_wxyz":  (0, 0.7071068, 0.7071068, 0 ),
+        # Shell mesh pose in the gripper-body frame.
+        "shell_pos":        (-0.014, -0.0463995, 0.0731),
+        "shell_quat_wxyz":  (1.0, 0.0, 0.0, 0.0),
+        # Tip-left body pose in gripper-body frame.
+        "tip_left_body_pos":      (-0.0238981, 0.0450619, -0.0545599),
+        "tip_left_body_quat_wxyz":(0.499998, -0.5, -0.5, -0.500002),
+        # Tip-left mesh pose in tip-left body frame (before slide).
+        "tip_left_mesh_pos":       (0.129783, 0.00999321, -0.0914614),
+        "tip_left_mesh_quat_wxyz": (0.499998, 0.5, 0.500002, 0.5),
+        # Tip-right body pose in gripper-body frame.
+        "tip_right_body_pos":      (0.0238981, -0.0450619, -0.0545599),
+        "tip_right_body_quat_wxyz":(0.707105, 0.707108, 0.0, 0.0),
+        # Tip-right mesh pose in tip-right body frame.
+        "tip_right_mesh_pos":       (-0.0379932, 0.129783, 0.00133753),
+        "tip_right_mesh_quat_wxyz": (0.707105, -0.707108, 0.0, 0.0),
+        # Slide motion: joint7/joint8 translate along local axis with range [0, 0.0475] m.
+        "slide_axis": (0.0, 0.0, -1.0),
+        "slide_range_m": 0.0475,
+    },
+}
+
+
 class ViserMonitorNode(Node):
     """Read-only visualization — URDF overlays and camera panels via viser."""
 
@@ -114,6 +162,8 @@ class ViserMonitorNode(Node):
         # Initialised in setup()
         self._server: Any = None
         self._urdf_vis: dict[str, Any] = {}
+        self._urdfs: dict[str, Any] = {}        # raw yourdfpy.URDF, for FK to drive grippers
+        self._gripper_state: dict[str, dict] = {}
         self._image_handles: dict[str, Any] = {}
         self._browser_proc: subprocess.Popen | None = None
 
@@ -129,7 +179,9 @@ class ViserMonitorNode(Node):
     def setup(self) -> None:
         import viser  # noqa: PLC0415
         import viser.extras  # noqa: PLC0415
+        import viser.transforms as vtf  # noqa: PLC0415
         import yourdfpy  # noqa: PLC0415
+        self._vtf = vtf
 
         self._server = viser.ViserServer(port=self._port)
         logger.info("[%s] viser server listening on http://localhost:%d", self.name, self._port)
@@ -188,10 +240,111 @@ class ViserMonitorNode(Node):
                         pass
 
             self._urdf_vis[arm_key] = urdf_vis
+            self._urdfs[arm_key] = urdf
             logger.info("[%s] URDF loaded: %s (root=%s, meshes=%d)", self.name, arm_key, root, len(urdf_vis._meshes))
+
+            gripper_spec = spec.get("gripper")
+            if gripper_spec is not None:
+                self._add_gripper(arm_key, root, gripper_spec)
 
         if self._auto_open_browser:
             self._open_browser()
+
+    def _add_gripper(self, arm_key: str, arm_root: str, gripper_spec: dict) -> None:
+        """Attach a gripper's 3 meshes + 2 animated tip frames under the arm's attach_link.
+
+        The root gripper frame is placed at the arm's attach_link pose via FK each
+        ``step()``; the shell is static under it, and each tip sits inside a
+        translation-only sub-frame whose position is driven by ``gripper_pos``.
+        """
+        import trimesh  # noqa: PLC0415 — dependency of viser anyway
+
+        gtype = gripper_spec.get("type", "linear_4310")
+        if gtype not in GRIPPER_PRESETS:
+            logger.warning(
+                "[%s] unknown gripper type %r; supported: %s",
+                self.name, gtype, sorted(GRIPPER_PRESETS.keys()),
+            )
+            return
+        preset = dict(GRIPPER_PRESETS[gtype])   # shallow copy so we don't mutate the shared preset
+        # YAML may override the body-offset (attach_link → gripper body frame)
+        # empirically — URDF/MJCF frame conventions for "link_6" disagree and
+        # the preset's default may still look slightly off. Tweak these two
+        # fields in the YAML to align the shell visually with the hardware.
+        if "body_offset_pos" in gripper_spec:
+            preset["body_offset_pos"] = tuple(float(v) for v in gripper_spec["body_offset_pos"])
+        if "body_offset_quat_wxyz" in gripper_spec:
+            preset["body_offset_quat_wxyz"] = tuple(float(v) for v in gripper_spec["body_offset_quat_wxyz"])
+        attach_link = gripper_spec.get("attach_link", "link_6")
+        if attach_link not in self._urdfs[arm_key].link_map:
+            logger.warning("[%s] attach_link %r not in URDF for %s", self.name, attach_link, arm_key)
+            return
+
+        def _load_mesh(rel_path: str):
+            full = os.path.abspath(os.path.expanduser(rel_path))
+            if not os.path.isfile(full):
+                raise FileNotFoundError(f"gripper mesh not found: {full}")
+            return trimesh.load(full, force="mesh")
+
+        # IMPORTANT: parent the gripper under the arm's root frame so it inherits
+        # the arm's extrinsic (e.g. the right arm's +Y offset). A sibling path
+        # would detach the gripper from the arm's world pose and make it float.
+        gripper_root_path = f"{arm_root}/gripper"
+        gripper_root = self._server.scene.add_frame(gripper_root_path, show_axes=False)
+
+        # Static shell mesh.
+        shell_mesh = _load_mesh(preset["shell_stl"])
+        self._server.scene.add_mesh_trimesh(
+            f"{gripper_root_path}/shell",
+            shell_mesh,
+            position=np.asarray(preset["shell_pos"], dtype=np.float32),
+            wxyz=np.asarray(preset["shell_quat_wxyz"], dtype=np.float32),
+        )
+
+        # Tip frames (body) + slide sub-frames + meshes.
+        tip_handles: dict[str, Any] = {}
+        for side in ("left", "right"):
+            body_pos = np.asarray(preset[f"tip_{side}_body_pos"], dtype=np.float32)
+            body_quat = np.asarray(preset[f"tip_{side}_body_quat_wxyz"], dtype=np.float32)
+            mesh_pos = np.asarray(preset[f"tip_{side}_mesh_pos"], dtype=np.float32)
+            mesh_quat = np.asarray(preset[f"tip_{side}_mesh_quat_wxyz"], dtype=np.float32)
+
+            body_path = f"{gripper_root_path}/tip_{side}"
+            slide_path = f"{body_path}/slide"
+            mesh_path = f"{slide_path}/mesh"
+
+            body_frame = self._server.scene.add_frame(body_path, show_axes=False)
+            body_frame.position = body_pos
+            body_frame.wxyz = body_quat
+
+            slide_frame = self._server.scene.add_frame(slide_path, show_axes=False)
+            slide_frame.position = np.zeros(3, dtype=np.float32)
+
+            tip_mesh = _load_mesh(preset[f"tip_{side}_stl"])
+            self._server.scene.add_mesh_trimesh(
+                mesh_path, tip_mesh, position=mesh_pos, wxyz=mesh_quat,
+            )
+            tip_handles[side] = slide_frame
+
+        # Precompute the 4x4 body-offset transform (attach_link → gripper-body
+        # frame) so step() only needs a single matmul with the link FK pose.
+        body_R = self._vtf.SO3(
+            np.asarray(preset["body_offset_quat_wxyz"], dtype=np.float64)
+        ).as_matrix()
+        body_T = np.eye(4, dtype=np.float64)
+        body_T[:3, :3] = body_R
+        body_T[:3, 3] = np.asarray(preset["body_offset_pos"], dtype=np.float64)
+
+        self._gripper_state[arm_key] = {
+            "urdf": self._urdfs[arm_key],
+            "attach_link": attach_link,
+            "root_frame": gripper_root,
+            "tip_slide_frames": tip_handles,
+            "slide_axis": np.asarray(preset["slide_axis"], dtype=np.float32),
+            "slide_range_m": float(preset["slide_range_m"]),
+            "body_offset_T": body_T,
+        }
+        logger.info("[%s] gripper attached: %s / %s @ %s", self.name, arm_key, gtype, attach_link)
 
     def step(self) -> None:
         # Update URDF configs from the latest joint state.
@@ -213,9 +366,38 @@ class ViserMonitorNode(Node):
                 # actuated joints. If the bus publishes more entries (e.g. gripper),
                 # trim to the URDF's joint count.
                 expected = len(self._urdf_vis[arm_key]._urdf.actuated_joint_names)  # type: ignore[attr-defined]
-                self._urdf_vis[arm_key].update_cfg(cfg[:expected])
+                trimmed_cfg = cfg[:expected]
+                self._urdf_vis[arm_key].update_cfg(trimmed_cfg)
+                # Drive the raw yourdfpy URDF too so get_transform() reflects the
+                # current pose when the gripper FK below asks for attach_link.
+                if arm_key in self._urdfs:
+                    self._urdfs[arm_key].update_cfg(trimmed_cfg)
             except Exception as exc:
                 logger.debug("[%s] URDF update for %s failed: %s", self.name, arm_key, exc)
+
+            # If a gripper is attached, place its root frame at the arm's
+            # attach_link pose (FK), then animate the tip slides from gripper_pos.
+            gs = self._gripper_state.get(arm_key)
+            if gs is not None:
+                try:
+                    # Compose attach_link FK (URDF convention) with the MJCF's
+                    # gripper-body offset so our gripper-root frame lands at the
+                    # body frame the shell / tip offsets are defined in.
+                    T_fk = gs["urdf"].get_transform(gs["attach_link"])
+                    T_world_body = T_fk @ gs["body_offset_T"]
+                    gs["root_frame"].position = T_world_body[:3, 3].astype(np.float32)
+                    gs["root_frame"].wxyz = self._vtf.SO3.from_matrix(T_world_body[:3, :3]).wxyz.astype(np.float32)
+                except Exception as exc:
+                    logger.debug("[%s] FK for gripper %s failed: %s", self.name, arm_key, exc)
+
+                gp_raw = data.get("gripper_pos")
+                if gp_raw is not None:
+                    gp = float(np.asarray(gp_raw).reshape(-1)[0])
+                    gp = max(0.0, min(1.0, gp))   # i2rt command space: 0 closed, 1 open
+                    slide_m = gp * gs["slide_range_m"]
+                    offset = (gs["slide_axis"] * slide_m).astype(np.float32)
+                    for frame in gs["tip_slide_frames"].values():
+                        frame.position = offset
 
         # Update camera panels.
         for label, topic in self._image_topics.items():
