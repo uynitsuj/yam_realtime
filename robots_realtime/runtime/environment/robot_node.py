@@ -78,8 +78,12 @@ class RobotNode(Node):
         poll_freq: float | None = None,
         startup_joint_pos: list[float] | None = None,
         startup_duration_s: float = 2.0,
-        shutdown_joint_pos: list[float] | None = None,
+        # Default to parking at the zero pose on shutdown; override in YAML with
+        # a custom list, or set `shutdown_joint_pos: null` to skip parking.
+        shutdown_joint_pos: list[float] | None = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         shutdown_duration_s: float = 2.0,
+        ramp_duration_s: float = 1.5,
+        resume_gap_s: float = 0.2,
         writer=None,
         **kwargs,
     ) -> None:
@@ -96,6 +100,19 @@ class RobotNode(Node):
         self._startup_duration_s = startup_duration_s
         self._shutdown_joint_pos = shutdown_joint_pos
         self._shutdown_duration_s = shutdown_duration_s
+        # Safe-handoff ramp state. On the first command and after any gap
+        # longer than resume_gap_s, seed _ramp_seed from the robot's actual
+        # joint_pos and blend smoothly from seed → target over ramp_duration_s
+        # seconds. After the window closes, commands pass through directly so
+        # the leader has full tracking authority — unlike a velocity-capped
+        # ramp, this is guaranteed to terminate even if the leader is moving
+        # faster than the ramp rate during the handoff window.
+        self._ramp_duration_s = float(ramp_duration_s)
+        self._resume_gap_s = float(resume_gap_s)
+        self._ramp_seed: np.ndarray | None = None
+        self._ramp_start_time: float = 0.0
+        self._ramping: bool = False
+        self._last_msg_ts: float = 0.0
 
     def setup(self) -> None:
         if self._robot is None:
@@ -113,24 +130,42 @@ class RobotNode(Node):
 
     def step(self) -> None:
         ts = time.time()
+        now = time.monotonic()
+
         if self._cmd_topic:
             cmd = self.get_latest(self._cmd_topic)
+            cmd_ts = self.get_timestamp(self._cmd_topic) if cmd is not None else None
             if cmd is not None:
                 # Use np.array() to ensure a writable copy (np.asarray may return read-only view)
-                joint_pos = np.array(cmd["joint_pos"], dtype=np.float64)
-                # Debug: log commands every 100 steps
-                if not hasattr(self, '_step_count'):
-                    self._step_count = 0
-                self._step_count += 1
-                if self._step_count % 100 == 0:
-                    print(f"[{self.name}] RobotNode step {self._step_count}: received cmd, calling command_joint_pos with {joint_pos}")
-                self._robot.command_joint_pos(joint_pos)
-            else:
-                if not hasattr(self, '_no_cmd_count'):
-                    self._no_cmd_count = 0
-                self._no_cmd_count += 1
-                if self._no_cmd_count % 100 == 0:
-                    print(f"[{self.name}] RobotNode: NO COMMAND received from {self._cmd_topic} (count: {self._no_cmd_count})")
+                target = np.array(cmd["joint_pos"], dtype=np.float64)
+                is_new = cmd_ts is not None and cmd_ts != self._last_msg_ts
+
+                # Trigger a handoff ramp on first message ever or after a cmd-stream gap.
+                # Seed from get_joint_pos() (full 7-element vector in command space) —
+                # NOT get_observations()["joint_pos"] which omits the gripper on i2rt
+                # MotorChainRobot and would cause a shape mismatch.
+                if is_new and (self._last_msg_ts == 0.0 or (cmd_ts - self._last_msg_ts) > self._resume_gap_s):
+                    try:
+                        seed = np.asarray(self._robot.get_joint_pos(), dtype=np.float64)
+                    except (AttributeError, TypeError):
+                        seed = None
+                    self._ramp_seed = seed.copy() if seed is not None and seed.shape == target.shape else target.copy()
+                    self._ramp_start_time = now
+                    self._ramping = self._ramp_duration_s > 0.0
+                if is_new:
+                    self._last_msg_ts = cmd_ts
+
+                if self._ramping and self._ramp_seed is not None:
+                    alpha = (now - self._ramp_start_time) / self._ramp_duration_s
+                    if alpha >= 1.0:
+                        self._ramping = False
+                        self._robot.command_joint_pos(target)
+                    else:
+                        alpha = max(0.0, alpha)
+                        blended = (1.0 - alpha) * self._ramp_seed + alpha * target
+                        self._robot.command_joint_pos(blended)
+                else:
+                    self._robot.command_joint_pos(target)
 
         self.publish("joint_state", self._robot.get_observations(), ts=ts)
 
@@ -169,7 +204,14 @@ class RobotNode(Node):
         # Pass through poll_freq if specified
         if "poll_freq" in params:
             kwargs["poll_freq"] = params["poll_freq"]
-        for key in ("startup_joint_pos", "startup_duration_s", "shutdown_joint_pos", "shutdown_duration_s"):
+        for key in (
+            "startup_joint_pos",
+            "startup_duration_s",
+            "shutdown_joint_pos",
+            "shutdown_duration_s",
+            "ramp_duration_s",
+            "resume_gap_s",
+        ):
             if key in params:
                 kwargs[key] = params[key]
         return kwargs

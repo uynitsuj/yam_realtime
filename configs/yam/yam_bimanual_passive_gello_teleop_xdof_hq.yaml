@@ -1,0 +1,51 @@
+version: "1"
+
+# Bimanual YAM teleop driven by two *passive* GELLO leaders on SocketCAN.
+# Requires:
+#   - can_lead_l / can_lead_r brought up at 1 Mbit/s (see xdof/scripts/reset_all_can.sh)
+#   - All 7 encoder devices per arm powered on and streaming 0x50F reports
+#   - python-can installed (added via pyproject)
+
+session:
+  save_root: recordings
+
+nodes:
+  - type: AgentNode
+    name: passive_gello_left
+    agent_class: robots_realtime.agents.teleoperation.passive_gello_leader_agent:PassiveGelloLeaderAgent
+    agent_kwargs:
+      channel: can_lead_l
+      robot_name: left
+      joint_signs: [-1, -1, 1, 1, -1, -1]
+      include_gripper: true
+    arm_key: left
+    loop_mode: flat_out
+
+  - type: AgentNode
+    name: passive_gello_right
+    agent_class: robots_realtime.agents.teleoperation.passive_gello_leader_agent:PassiveGelloLeaderAgent
+    agent_kwargs:
+      channel: can_lead_r
+      robot_name: right
+      joint_signs: [-1, -1, 1, 1, -1, -1]
+      include_gripper: true
+    arm_key: right
+    loop_mode: flat_out
+
+  - type: RobotNode
+    name: yam_left
+    robot_config: robot_configs/yam/xdof_hq/left.yaml
+    cmd_topic: passive_gello_left/joint_pos
+    poll_freq: 200
+    ramp_duration_s: 0.5
+    startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    startup_duration_s: 2.0
+
+  - type: RobotNode
+    name: yam_right
+    robot_config: robot_configs/yam/xdof_hq/right.yaml
+    cmd_topic: passive_gello_right/joint_pos
+    poll_freq: 200
+    ramp_duration_s: 0.5
+    startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    startup_duration_s: 2.0
