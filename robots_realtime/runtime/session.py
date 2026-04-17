@@ -96,6 +96,8 @@ class Session:
         record_node_names: list[str] | None = None,
         record_topic: str | None = None,
         auto_record_duration: float | None = None,
+        start_paused: bool = False,
+        record_on_unpause: bool = False,
         pub_port: int = 5555,
         sub_port: int = DEFAULT_SUB_PORT,
     ) -> None:
@@ -104,6 +106,16 @@ class Session:
         self._save_root = Path(save_root)
         self._record_topic = record_topic
         self._auto_record_duration = auto_record_duration
+        # start_paused: begin with RobotNode commands gated so the arms don't
+        # start tracking the policy (or any cmd_topic producer) until the
+        # operator explicitly hits space. Recommended for policy configs where
+        # the arm could snap to an unexpected pose on startup.
+        # record_on_unpause: when the operator unpauses, automatically start an
+        # episode if one isn't already running. Useful for policy eval where
+        # you want every rollout captured from the instant the policy takes over.
+        self._start_paused = bool(start_paused)
+        self._record_on_unpause = bool(record_on_unpause)
+        self._is_paused: bool = False
         self._session_start_time = time.time()
 
         self._hosts: list[ProcessHost] = []
@@ -153,6 +165,20 @@ class Session:
         for host in self._hosts:
             log_path = self._log_dir / f"{host.node_name}.log"
             host.start(log_path=log_path)
+
+        # If configured to start paused, broadcast PAUSE to every subprocess
+        # BEFORE calling send_start(). Each ProcessHost's control socket is
+        # already bound once host.start() returns, so the PAUSE arrives before
+        # the node's step loop begins — RobotNode.step()'s first tick will see
+        # self._paused=True and skip command_joint_pos.
+        if self._start_paused:
+            self._is_paused = True
+            for host in self._hosts:
+                try:
+                    host.pause()
+                except Exception:
+                    pass
+
         for host in self._hosts:
             host.send_start()
 
@@ -250,6 +276,48 @@ class Session:
             self.end_episode(save=True)
         else:
             self.start_episode()
+
+    # ------------------------------------------------------------------
+    # Pause / resume — gates RobotNode command output; other nodes keep
+    # running (cameras, agents) so the TUI, viser, and inference stay live.
+    # ------------------------------------------------------------------
+
+    @property
+    def is_paused(self) -> bool:
+        return getattr(self, "_is_paused", False)
+
+    def pause(self) -> None:
+        if getattr(self, "_is_paused", False):
+            return
+        self._is_paused = True
+        for host in self._hosts:
+            try:
+                host.pause()
+            except Exception:
+                pass
+
+    def resume(self) -> None:
+        if not getattr(self, "_is_paused", False):
+            return
+        self._is_paused = False
+        for host in self._hosts:
+            try:
+                host.resume()
+            except Exception:
+                pass
+        # Optional: prime recording when the operator unpauses. Lets a policy
+        # eval config capture every rollout from the instant of handoff.
+        if self._record_on_unpause and not self._is_recording:
+            try:
+                self.start_episode()
+            except Exception:
+                pass
+
+    def toggle_pause(self) -> None:
+        if self.is_paused:
+            self.resume()
+        else:
+            self.pause()
 
     @property
     def log_dir(self) -> Path | None:

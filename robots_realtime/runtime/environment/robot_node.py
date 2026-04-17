@@ -132,6 +132,13 @@ class RobotNode(Node):
         ts = time.time()
         now = time.monotonic()
 
+        # Paused: don't issue joint commands. i2rt's internal control loop keeps
+        # the motors at the last commanded position. Skip _last_msg_ts updates
+        # so that on resume the gap > resume_gap_s triggers a fresh ramp seed.
+        if self._paused:
+            self.publish("joint_state", self._robot.get_observations(), ts=ts)
+            return
+
         if self._cmd_topic:
             cmd = self.get_latest(self._cmd_topic)
             cmd_ts = self.get_timestamp(self._cmd_topic) if cmd is not None else None

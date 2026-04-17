@@ -50,6 +50,17 @@ def _make_table(session) -> Table:
 
 
 def _recording_line(session) -> Text:
+    if session.is_paused:
+        # Big visible indicator — gates RobotNode commands, so the operator
+        # should know at a glance that motors are held.
+        t = Text()
+        t.append("⏸  PAUSED", style="bold yellow")
+        hint = "  (robot commands held — press [space] to resume"
+        if getattr(session, "_record_on_unpause", False):
+            hint += " + auto-record"
+        hint += ")"
+        t.append(hint, style="dim")
+        return t
     if not session.is_recording:
         return Text("○  idle", style="dim")
 
@@ -66,10 +77,15 @@ def _recording_line(session) -> Text:
     return t
 
 
-def _help_line() -> Text:
+def _help_line(session=None) -> Text:
     t = Text(justify="right", style="dim")
     t.append("[r]", style="bold white"); t.append(" record  ")
     t.append("[d]", style="bold white"); t.append(" discard  ")
+    t.append("[space]", style="bold white")
+    if session is not None and session.is_paused:
+        t.append(" resume  ")
+    else:
+        t.append(" pause  ")
     t.append("[q]", style="bold white"); t.append(" quit")
     return t
 
@@ -115,7 +131,7 @@ def _log_text(log_dir: Path | None, n_lines: int = 8) -> Text:
 def _render(session, n_log_lines: int = 8) -> Panel:
     node_table = _make_table(session)
     rec_line   = _recording_line(session)
-    help_line  = _help_line()
+    help_line  = _help_line(session)
 
     from rich.rule import Rule
 
@@ -152,6 +168,8 @@ def _read_keys(session, stop_event: threading.Event) -> None:
                 session.toggle_recording()
             elif ch == "d":
                 session.end_episode(save=False)
+            elif ch == " ":
+                session.toggle_pause()
             elif ch == "q":
                 stop_event.set()
                 break

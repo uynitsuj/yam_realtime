@@ -93,6 +93,10 @@ class Node(ABC):
         self._subscriber: Subscriber | None = None
         self._stop = False
         self._recording: bool = False
+        # Session-level gate toggled via `session.toggle_pause()` (space in TUI).
+        # Base behaviour is a no-op; RobotNode overrides to stop issuing joint
+        # commands while paused so the motors hold their last pose.
+        self._paused: bool = False
 
     # ------------------------------------------------------------------
     # Subclass interface
@@ -130,6 +134,25 @@ class Node(ABC):
         if self._writer is not None and self._writer.is_open:
             return self._writer.close()
         return ""
+
+    # ------------------------------------------------------------------
+    # Pause / resume — session-level gate driven by the TUI (space key)
+    # ------------------------------------------------------------------
+
+    def pause(self) -> None:
+        """Called when the session enters pause. Default: set the flag only.
+
+        RobotNode overrides this to stop issuing joint commands so the motors
+        hold their last pose. Other node types are free to ignore it.
+        """
+        self._paused = True
+
+    def resume(self) -> None:
+        self._paused = False
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
 
     # ------------------------------------------------------------------
     # Transport helpers (available inside step())
@@ -328,6 +351,18 @@ def _host_worker(
                 except Exception:
                     pass
                 ctrl.send(_CTRL_OK)
+            elif msg == b"PAUSE":
+                try:
+                    node.pause()
+                except Exception:
+                    pass
+                ctrl.send(_CTRL_OK)
+            elif msg == b"RESUME":
+                try:
+                    node.resume()
+                except Exception:
+                    pass
+                ctrl.send(_CTRL_OK)
             else:
                 # Unknown command — send OK to unblock the requester
                 ctrl.send(_CTRL_OK)
@@ -400,6 +435,18 @@ class ProcessHost:
         self._ctrl.send(b"STOP_RECORDING")
         self._ctrl.recv()
         return ""
+
+    def pause(self) -> None:
+        """Tell the node subprocess to enter its paused state."""
+        assert self._ctrl is not None
+        self._ctrl.send(b"PAUSE")
+        self._ctrl.recv()
+
+    def resume(self) -> None:
+        """Tell the node subprocess to exit its paused state."""
+        assert self._ctrl is not None
+        self._ctrl.send(b"RESUME")
+        self._ctrl.recv()
 
     def stop(self, timeout: float = 3.0) -> None:
         if self._ctrl is not None:

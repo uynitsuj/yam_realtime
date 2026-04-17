@@ -12,6 +12,14 @@ version: "1"
 
 session:
   save_root: recordings
+  # Policy-specific safety + ergonomics:
+  #   - start_paused: RobotNode commands are gated on startup so the arm doesn't
+  #     snap to wherever the policy thinks it should be. Hit [space] in the TUI
+  #     to hand off control.
+  #   - record_on_unpause: when the operator unpauses, automatically start an
+  #     episode so every rollout is captured from the instant of handoff.
+  start_paused: true
+  record_on_unpause: false
 
 nodes:
   - type: AgentNode
@@ -19,15 +27,15 @@ nodes:
     agent_class: robots_realtime.agents.policy_learning.async_pi0_agent:AsyncDiffusionAgent
     agent_kwargs:
       ip: 127.0.0.1
-      port: 8000
-      action_horizon: 25
-      inference_mode: async            # sync | async | async_rate_limited
-      # inference_interval_s: 0.1       # only used when inference_mode=async_rate_limited
+      port: 8012
+      action_horizon: 30
+      inference_mode: async_rate_limited            # sync | async | async_rate_limited
+      inference_interval_s: 0.7       # only used when inference_mode=async_rate_limited
       # Chunk-boundary blend auto-scales with inference latency:
       # num_smoothed = clip(consumed_during_inference, min, max),
       # also capped by remaining old-chunk and new-chunk lengths.
       min_smoothed_actions: 1
-      max_smoothed_actions: 8
+      max_smoothed_actions: 10
       use_joint_state_as_action: false
     state_topics:
       left:  yam_left/joint_state       # flatten → left-joint_pos, left-gripper_pos
@@ -91,11 +99,19 @@ nodes:
     up_axis: "+z"
     initial_camera_position: [-0.7, -0.31, 0.3]  # behind the arms, slightly elevated
     initial_camera_look_at:  [0.45, -0.31, 0.3]  # workspace centre between the two bases
+    # Action-chunk prediction overlay: viser renders N small axes frames along
+    # the FK-projected end-effector path for each arm so you can see where the
+    # policy intends to take the arms over the next ~1 s of lookahead. Axes
+    # shrink with chunk index (nearer future larger, farther future smaller).
+    chunk_topic: openpi_policy/chunk
+    n_chunk_frames: 10
+    chunk_frame_axes_length: 0.03
     urdfs:
       yam_left:
         path: dependencies/i2rt/i2rt/robot_models/arm/yam/yam.urdf
         state_topic: yam_left/joint_state
         flip_joints: true
+        chunk_arm_key: left                # matches the agent's chunk payload
         gripper:
           type: linear_4310
           attach_link: link_6
@@ -106,6 +122,7 @@ nodes:
         path: dependencies/i2rt/i2rt/robot_models/arm/yam/yam.urdf
         state_topic: yam_right/joint_state
         flip_joints: true
+        chunk_arm_key: right
         gripper:
           type: linear_4310
           attach_link: link_6

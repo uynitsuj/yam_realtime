@@ -133,14 +133,27 @@ class ViserMonitorNode(Node):
         initial_camera_position: tuple[float, float, float] = (-1.3, 0.3, 0.9),
         initial_camera_look_at: tuple[float, float, float] = (0.45, 0.3, 0.3),
         up_axis: str = "+z",
+        # Optional chunk-prediction visualization: subscribe to the agent's
+        # `chunk` topic and render N end-effector frames per arm along the
+        # predicted trajectory. Each URDF spec opts in via `chunk_arm_key:
+        # left|right` matching the chunk payload.
+        chunk_topic: str | None = None,
+        n_chunk_frames: int = 10,
+        chunk_frame_axes_length: float = 0.03,
+        chunk_frame_axes_radius: float = 0.0025,
         writer=None,
         **kwargs,
     ) -> None:
         self._urdfs_spec = urdfs or {}
         self._image_topics = image_topics or {}
+        self._chunk_topic = chunk_topic
+        self._n_chunk_frames = int(max(0, n_chunk_frames))
+        self._chunk_axes_length = float(chunk_frame_axes_length)
+        self._chunk_axes_radius = float(chunk_frame_axes_radius)
         self.subscribed_topics = (
             [spec["state_topic"] for spec in self._urdfs_spec.values() if "state_topic" in spec]
             + list(self._image_topics.values())
+            + ([self._chunk_topic] if self._chunk_topic else [])
         )
         # poll_freq drives how often the URDF/image GUI updates — lower is cheaper.
         self.poll_freq = float(viz_freq)
@@ -162,9 +175,14 @@ class ViserMonitorNode(Node):
         # Initialised in setup()
         self._server: Any = None
         self._urdf_vis: dict[str, Any] = {}
-        self._urdfs: dict[str, Any] = {}        # raw yourdfpy.URDF, for FK to drive grippers
+        self._urdfs: dict[str, Any] = {}        # raw yourdfpy.URDF, for FK to drive grippers + chunks
         self._gripper_state: dict[str, dict] = {}
         self._image_handles: dict[str, Any] = {}
+        # chunk frame handles: arm_key -> list of viser frame handles (one per
+        # downsampled chunk step). Pre-allocated in setup() so step() only has
+        # to update positions/quats — no viser create/destroy per tick.
+        self._chunk_frames: dict[str, list] = {}
+        self._chunk_tip_offset_T: dict[str, np.ndarray] = {}
         self._browser_proc: subprocess.Popen | None = None
 
     # Surfaced on the session TUI (see tui.py:_endpoints_text).
@@ -246,6 +264,10 @@ class ViserMonitorNode(Node):
             gripper_spec = spec.get("gripper")
             if gripper_spec is not None:
                 self._add_gripper(arm_key, root, gripper_spec)
+
+            # Pre-allocate chunk prediction frames for this arm if it opted in.
+            if self._chunk_topic and spec.get("chunk_arm_key") and self._n_chunk_frames > 0:
+                self._init_chunk_frames(arm_key, root, spec)
 
         if self._auto_open_browser:
             self._open_browser()
@@ -346,6 +368,113 @@ class ViserMonitorNode(Node):
         }
         logger.info("[%s] gripper attached: %s / %s @ %s", self.name, arm_key, gtype, attach_link)
 
+    def _init_chunk_frames(self, arm_key: str, arm_root: str, spec: dict) -> None:
+        """Allocate ``n_chunk_frames`` viser frame handles per arm for chunk predictions.
+
+        Frames are children of the arm's root frame (so they inherit the same
+        extrinsic as the arm itself). We update their `position`/`wxyz` each
+        tick from FK of downsampled chunk actions — no create/destroy per step.
+        """
+        # Ramp down axes_length across chunk index so "further into the future"
+        # is visually smaller — quick feedback that later predictions are less
+        # trusted without needing a separate legend.
+        handles = []
+        base_len = self._chunk_axes_length
+        for i in range(self._n_chunk_frames):
+            # linear ramp from 1.0 → 0.35 across i ∈ [0, N-1]
+            shrink = 1.0 - 0.65 * (i / max(1, self._n_chunk_frames - 1))
+            h = self._server.scene.add_frame(
+                f"{arm_root}/chunk_{i}",
+                show_axes=True,
+                axes_length=base_len * shrink,
+                axes_radius=self._chunk_axes_radius * shrink,
+            )
+            # Start hidden until first chunk message lands.
+            h.visible = False
+            handles.append(h)
+        self._chunk_frames[arm_key] = handles
+
+        # Store the tip-of-gripper offset in the attach_link frame for this arm.
+        # If a gripper is configured, we want the predicted frame to land at the
+        # grasp site (≈ 13.5 cm past link_6 along the gripper's -Z) rather than
+        # at link_6 itself. Keep identity if no gripper for that arm.
+        offset_T = np.eye(4, dtype=np.float64)
+        gs = self._gripper_state.get(arm_key)
+        if gs is not None:
+            # body_offset_T takes attach_link → gripper body; additionally
+            # offset along gripper -Z by a representative grasp-site length.
+            grasp_offset = np.eye(4, dtype=np.float64)
+            grasp_offset[:3, 3] = np.array([0.0, 0.0, -0.1347])   # linear_4310 grasp_site
+            offset_T = gs["body_offset_T"] @ grasp_offset
+        self._chunk_tip_offset_T[arm_key] = offset_T
+
+        logger.info(
+            "[%s] chunk prediction viz: arm=%s chunk_key=%s n_frames=%d",
+            self.name, arm_key, spec.get("chunk_arm_key"), self._n_chunk_frames,
+        )
+
+    def _update_chunk_frames(self, chunk_msg: dict) -> None:
+        """Per-tick: run FK on downsampled chunk actions, update frame handles."""
+        for arm_key, spec in self._urdfs_spec.items():
+            chunk_key = spec.get("chunk_arm_key")
+            if chunk_key is None or arm_key not in self._chunk_frames:
+                continue
+            arm_chunk = chunk_msg.get(chunk_key)
+            if arm_chunk is None:
+                continue
+            arm_chunk = np.asarray(arm_chunk)
+            if arm_chunk.ndim != 2 or arm_chunk.shape[1] < 6:
+                continue
+
+            urdf = self._urdfs[arm_key]
+            handles = self._chunk_frames[arm_key]
+            attach_link = spec.get("gripper", {}).get("attach_link", "link_6")
+            tip_offset = self._chunk_tip_offset_T[arm_key]
+
+            # Downsample to N evenly-spaced indices across whatever the agent
+            # sent (the server chunk length can be anywhere from 1 to 30+).
+            n_avail = arm_chunk.shape[0]
+            n_show = min(len(handles), n_avail)
+            if n_show <= 0:
+                for h in handles:
+                    h.visible = False
+                continue
+            idx = np.linspace(0, n_avail - 1, n_show).astype(int)
+
+            # Save current URDF cfg so we can restore after predictive FK —
+            # otherwise the arm URDF would visually snap to the last chunk
+            # action instead of reflecting the live joint_state.
+            saved_cfg = None
+            try:
+                saved_cfg = np.asarray(urdf.cfg, dtype=np.float64).copy()
+            except Exception:
+                pass
+
+            for slot, action_idx in enumerate(idx):
+                cfg = np.asarray(arm_chunk[action_idx][:6], dtype=np.float64)
+                if spec.get("flip_joints", True):
+                    cfg = np.flip(cfg)
+                try:
+                    urdf.update_cfg(cfg)
+                    T = urdf.get_transform(attach_link) @ tip_offset
+                except Exception:
+                    handles[slot].visible = False
+                    continue
+                handles[slot].position = T[:3, 3].astype(np.float32)
+                handles[slot].wxyz = self._vtf.SO3.from_matrix(T[:3, :3]).wxyz.astype(np.float32)
+                handles[slot].visible = True
+
+            # Any unused slots (e.g. chunk got shorter near drain) → hide.
+            for slot in range(n_show, len(handles)):
+                handles[slot].visible = False
+
+            # Restore live cfg so the URDF mesh keeps reflecting real joint state.
+            if saved_cfg is not None:
+                try:
+                    urdf.update_cfg(saved_cfg)
+                except Exception:
+                    pass
+
     def step(self) -> None:
         # Update URDF configs from the latest joint state.
         for arm_key, spec in self._urdfs_spec.items():
@@ -398,6 +527,12 @@ class ViserMonitorNode(Node):
                     offset = (gs["slide_axis"] * slide_m).astype(np.float32)
                     for frame in gs["tip_slide_frames"].values():
                         frame.position = offset
+
+        # Update chunk prediction frames (if enabled).
+        if self._chunk_topic and self._chunk_frames:
+            chunk_msg = self.get_latest(self._chunk_topic)
+            if chunk_msg is not None:
+                self._update_chunk_frames(chunk_msg)
 
         # Update camera panels.
         for label, topic in self._image_topics.items():
@@ -692,4 +827,8 @@ class ViserMonitorNode(Node):
             "initial_camera_position": tuple(params.get("initial_camera_position", (-1.3, 0.3, 0.9))),
             "initial_camera_look_at":  tuple(params.get("initial_camera_look_at",  (0.45, 0.3, 0.3))),
             "up_axis":                 params.get("up_axis", "+z"),
+            "chunk_topic":             params.get("chunk_topic"),
+            "n_chunk_frames":          int(params.get("n_chunk_frames", 10)),
+            "chunk_frame_axes_length": float(params.get("chunk_frame_axes_length", 0.03)),
+            "chunk_frame_axes_radius": float(params.get("chunk_frame_axes_radius", 0.0025)),
         }

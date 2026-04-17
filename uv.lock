@@ -2147,6 +2147,22 @@ wheels = [
 ]
 
 [[package]]
+name = "openpi-client"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dm-tree" },
+    { name = "msgpack" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3e/73/b6535d38f04bf49a851723eb95e0ab9c6e77179a0de6c06d6d3bd5ee08be/openpi_client-0.1.2.tar.gz", hash = "sha256:2b4a64ab1f1e2d5a54ff1130314abca4f537f2568909ea0b8ec3dd4c7cd6b751", size = 11695, upload-time = "2026-03-30T17:14:06.127Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/55/84ddc2c41a8178f63f8b668cf90497601bcd354128813aad63db96571c45/openpi_client-0.1.2-py3-none-any.whl", hash = "sha256:b8aa6d2ea7172d3b7c1fcf867d43930052b5ff19ea7b777966781105aa989897", size = 13952, upload-time = "2026-03-30T17:14:04.959Z" },
+]
+
+[[package]]
 name = "opt-einsum"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3005,6 +3021,7 @@ dependencies = [
     { name = "numpy" },
     { name = "omegaconf" },
     { name = "opencv-python" },
+    { name = "openpi-client" },
     { name = "portal" },
     { name = "protobuf" },
     { name = "pyroki" },
@@ -3063,6 +3080,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "omegaconf" },
     { name = "opencv-python" },
+    { name = "openpi-client", specifier = "==0.1.2" },
     { name = "panda-python", marker = "extra == 'franka-panda'", path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_python-0.7.5+libfranka.0.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" },
     { name = "portal" },
     { name = "protobuf", specifier = ">=6.33.1" },

@@ -100,9 +100,9 @@ class AsyncDiffusionAgent(PolicyAgent):
         use_joint_state_as_action: bool = False,
         ip: str = "0.0.0.0",
         port: int = 8111,
-        action_horizon: int = 25,
-        inference_mode: InferenceMode = "async",
-        inference_interval_s: float | None = None,
+        action_horizon: int = 30,
+        inference_mode: InferenceMode = "async_rate_limited",
+        inference_interval_s: float | None = 0.5,
         min_smoothed_actions: int = 1,
         max_smoothed_actions: int = 8,
         model_io_config: ModelIOConfig | None = None,
@@ -207,7 +207,7 @@ class AsyncDiffusionAgent(PolicyAgent):
     # Observation preprocessing
     # ------------------------------------------------------------------ #
 
-    def obs_to_model_input(self, obs: Dict[str, Any]) -> Dict[str, Any]:
+    def obs_to_model_input(self, obs: Dict[str, Any]) -> Dict[str, Any] | None:
         """Flatten bus-message obs into the flat ``{key: array}`` shape the server expects.
 
         AgentNode delivers obs as ``{obs_key: bus_message_dict}``. State messages
@@ -215,26 +215,30 @@ class AsyncDiffusionAgent(PolicyAgent):
         which flattens naturally with the ``obs_key`` prefix. Camera messages wrap
         frames as ``{"images": {"rgb": arr}, "timestamp": ts}`` which flattens to
         ``"<obs_key>-images-rgb"`` — matches ``image_keys`` convention.
+
+        Returns ``None`` if any required mlp / image key is missing. This happens
+        early in the session lifetime before producer nodes (RobotNodes, Cameras)
+        have published their first message — the consumer should treat this as
+        "not ready yet" and simply skip publishing an action for this tick.
         """
         flat = _recursive_flatten(obs)
 
-        flat_state = []
-        for k in self.config.mlp_keys:
-            if k not in flat:
-                raise KeyError(
-                    f"AsyncDiffusionAgent expected obs key {k!r} (from mlp_keys) but it was missing. "
-                    f"Available flat keys: {sorted(flat.keys())}"
-                )
-            flat_state.append(np.asarray(flat[k]).reshape(-1))
+        required = list(self.config.mlp_keys) + list(self.config.image_keys)
+        missing = [k for k in required if k not in flat]
+        if missing:
+            now = time.monotonic()
+            if now - getattr(self, "_last_missing_log_ts", 0.0) > 2.0:
+                # Throttled log so the user can see what we're still waiting on.
+                preview = ", ".join(missing[:4]) + (" …" if len(missing) > 4 else "")
+                print(f"[AsyncDiffusionAgent] obs not ready — waiting on: {preview}")
+                self._last_missing_log_ts = now
+            return None
+
+        flat_state = [np.asarray(flat[k]).reshape(-1) for k in self.config.mlp_keys]
         state = np.concatenate(flat_state, axis=-1)
 
-        images = {}
+        images: Dict[str, Any] = {}
         for k in self.config.image_keys:
-            if k not in flat:
-                raise KeyError(
-                    f"AsyncDiffusionAgent expected obs key {k!r} (from image_keys) but it was missing. "
-                    f"Available flat keys: {sorted(flat.keys())}"
-                )
             img = flat[k]
             img = self._image_tools.convert_to_uint8(self._image_tools.resize_with_pad(img, 224, 224))
             img = np.transpose(img, (2, 0, 1))
@@ -247,8 +251,17 @@ class AsyncDiffusionAgent(PolicyAgent):
     # ------------------------------------------------------------------ #
 
     def act(self, obs: Dict[str, Any]) -> Dict[str, Any]:
-        super_action = super().act(obs) if hasattr(super(), "act") else {}
-        a = np.asarray(self(obs))
+        # PolicyAgent.act is abstract (raises NotImplementedError); don't call super.
+        raw = self(obs)
+        if raw is None:
+            # Obs incomplete (producers still warming up) or the very first
+            # inference hasn't landed yet — return an empty action dict so
+            # AgentNode's _publish_commands is a no-op for this tick.
+            return {}
+        # Force a writable copy: chunks sourced from msgpack deserialization
+        # (over the websocket) come back as read-only views, and the clip
+        # steps below mutate in place.
+        a = np.array(raw, dtype=np.float32, copy=True)
         if self.use_joint_state_as_action:
             assert a.shape == (28,), a.shape
             left = a[:14]
@@ -258,7 +271,6 @@ class AsyncDiffusionAgent(PolicyAgent):
             return {
                 "left": {"pos": left[:7], "vel": left[7:]},
                 "right": {"pos": right[:7], "vel": right[7:]},
-                **super_action,
             }
         assert a.shape == (14,), a.shape
         left = a[:7]
@@ -268,14 +280,55 @@ class AsyncDiffusionAgent(PolicyAgent):
         return {
             "left": {"pos": left},
             "right": {"pos": right},
-            **super_action,
+            # Snapshot of the remaining chunk predictions so the viser monitor
+            # (or anyone else) can visualize where the policy expects each arm
+            # to be over the next N steps. Underscore prefix → AgentNode treats
+            # this as meta and publishes it on a dedicated topic instead of as
+            # a joint_pos command.
+            "_chunk": self._snapshot_chunk(),
         }
 
-    def __call__(self, obs: Dict[str, Any]) -> np.ndarray:
+    def _snapshot_chunk(self) -> Dict[str, Any] | None:
+        """Return the still-unconsumed tail of the current action chunk, split by arm.
+
+        Shape: {"left": (N, 7), "right": (N, 7)} for the 14-dim bimanual case.
+        Returns None if the buffer is not yet populated or is empty. The tail
+        starts at `action_counter` so consumers can interpret step 0 of the
+        returned array as "the next action we'd dequeue".
+        """
+        with self.action_lock:
+            if self.last_actions is None:
+                return None
+            remaining = self.last_actions[self.action_counter:]
+        if remaining.shape[0] == 0 or remaining.ndim != 2:
+            return None
+        # For use_joint_state_as_action=False, each row is (14,) = left7 + right7.
+        # We only publish the pos-flavoured split here; the velocity flavour (28,)
+        # case is rarely used and the visualizer doesn't need vel anyway.
+        if remaining.shape[1] == 14:
+            return {
+                "left":  np.ascontiguousarray(remaining[:, :7], dtype=np.float32),
+                "right": np.ascontiguousarray(remaining[:, 7:], dtype=np.float32),
+            }
+        if remaining.shape[1] == 28:
+            return {
+                "left":  np.ascontiguousarray(remaining[:, :7],   dtype=np.float32),
+                "right": np.ascontiguousarray(remaining[:, 14:21], dtype=np.float32),
+            }
+        return None
+
+    def __call__(self, obs: Dict[str, Any]) -> np.ndarray | None:
+        model_input = self.obs_to_model_input(obs)
+        if model_input is None:
+            return None
         with self.obs_lock:
-            self._obs = self.obs_to_model_input(obs)
+            self._obs = model_input
         if self.inference_mode == "sync":
             return self._agent.get_action(self._obs)["actions"]
+        # Async modes: if the background thread hasn't produced the first chunk
+        # yet, tell the consumer we're not ready rather than blocking step().
+        if self.last_actions is None:
+            return None
         return self.select_action()
 
     # ------------------------------------------------------------------ #

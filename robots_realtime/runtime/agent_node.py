@@ -151,6 +151,13 @@ class AgentNode(Node):
         if "_record" in action:
             self.publish("record", {"record": bool(action["_record"])}, ts=ts)
 
+        # Optional action-chunk snapshot for visualization consumers (e.g.
+        # ViserMonitorNode rendering predicted end-effector positions). The
+        # agent sets this under "_chunk" — keep it off the joint-command path.
+        chunk = action.get("_chunk")
+        if chunk is not None:
+            self.publish("chunk", chunk, ts=ts)
+
         self._publish_commands(action, ts)
 
     def _publish_commands(self, action: dict, ts: float) -> None:
