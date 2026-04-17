@@ -57,11 +57,11 @@ nodes:
       ip: 127.0.0.1
       port: 8012
       action_horizon: 30
-      inference_mode: sync                 # sync | async | async_rate_limited | async_rtc
+      inference_mode: async_rtc                 # sync | async | async_rate_limited | async_rtc
       # inference_interval_s: 0.7                 # rate cap in seconds (None = flat-out async)
       # min_smoothed_actions: 1                 # only meaningful for async / async_rate_limited
       # max_smoothed_actions: 10                # (ignored in sync and effectively unused in async_rtc)
-      rtc_execution_horizon: 12               # async_rtc only; None → server's action_horizon
+      rtc_execution_horizon: 25               # async_rtc only; None → server's action_horizon
       rtc_consumer_rate_hz: 30                  # async_rtc only; converts latency → inference_delay ticks
       # Upper clamp on RTC guidance weight (server side). With the prefix now
       # normalized into model-space by Policy._rtc_action_normalizer, a
