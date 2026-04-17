@@ -15,15 +15,28 @@ ramp blend at the chunk boundary. The blend length auto-scales with inference
 latency (more blending when the server took longer, since the old chunk is
 staler), clamped by ``[min_smoothed_actions, max_smoothed_actions]``.
 
-Three inference modes (``inference_mode`` kwarg):
+Four inference modes (``inference_mode`` kwarg):
 
     sync                — blocking, synchronous. Uses OpenPI's ``ActionChunkBroker``
                           so inference only fires when the last chunk is exhausted
                           (every ``action_horizon`` consumer calls).
-    async               — background thread, runs inference flat-out (no sleep
-                          between iterations). Fastest buffer refresh.
-    async_rate_limited  — background thread, sleeps ``inference_interval_s``
-                          seconds between iterations to cap inference rate.
+    async               — background thread, runs inference flat-out by default.
+    async_rate_limited  — background thread, rate-capped (``inference_interval_s``
+                          REQUIRED).
+    async_rtc           — background thread + Real-Time Chunking. Each inference
+                          sends the unexecuted tail of the current chunk as
+                          ``action_prefix`` plus a rolling-average
+                          ``inference_delay``; server-side flow-matching
+                          guidance (see openpi pi0.sample_actions_rtc) keeps
+                          new-chunk early steps coherent with what the robot
+                          is already committed to executing. Fixes chunk-
+                          boundary jitter at the model level; incompatible
+                          with sync (no leftover prefix to send).
+
+``inference_interval_s`` is an **orthogonal** rate cap: REQUIRED for
+``async_rate_limited``, OPTIONAL for ``async`` and ``async_rtc`` (``None`` =
+flat-out). Useful with fast GPUs where flat-out inference re-infers so quickly
+that chunks overlap almost entirely.
 
 OpenPI client imports are done lazily inside ``__init__`` so this module can be
 imported without ``openpi_client`` being installed — it's only required when
@@ -42,7 +55,8 @@ from robots_realtime.agents.agent import PolicyAgent
 from robots_realtime.agents.constants import ActionSpec
 from robots_realtime.robots.utils import Rate
 
-InferenceMode = Literal["sync", "async", "async_rate_limited"]
+InferenceMode = Literal["sync", "async", "async_rate_limited", "async_rtc"]
+_ASYNC_MODES = ("async", "async_rate_limited", "async_rtc")
 
 
 @dataclass
@@ -106,12 +120,33 @@ class AsyncDiffusionAgent(PolicyAgent):
         min_smoothed_actions: int = 1,
         max_smoothed_actions: int = 8,
         model_io_config: ModelIOConfig | None = None,
+        # --- Real-Time Chunking (RTC) --------------------------------------- #
+        # Only used when ``inference_mode == "async_rtc"``. RTC sends the
+        # unexecuted tail of the current chunk as ``action_prefix`` plus an
+        # estimated ``inference_delay`` (rolling mean of past inference
+        # durations times the consumer tick rate). Server-side flow-matching
+        # (see openpi pi0.sample_actions_rtc) keeps the new chunk's early
+        # steps coherent with what the robot is already committed to execute.
+        rtc_execution_horizon: int | None = None,
+        rtc_consumer_rate_hz: float = 30.0,
+        # Upper clamp on the RTC guidance weight (server side). Leave at the
+        # server's default (1.0) unless you've tuned a specific policy. Higher
+        # values amplify the prefix-tracking correction — too high and the
+        # guided velocity overshoots, causing chunks to start far off from
+        # the observation ("arm shoots forward"). Lower is safer.
+        rtc_max_guidance_weight: float | None = None,
+        # Server-side per-denoising-step debug prints (gw, |v_t|, |corr|, |err|,
+        # |x1_t|, |prefix|, time). Plus a client-side log of the chunk-jump
+        # magnitude between the tail of the old chunk and the head of the new
+        # one — catches "shoots forward" events where RTC pulled too hard.
+        rtc_debug: bool = False,
     ) -> None:
         # Validate config first — user-error (bad mode) should surface before
         # env-error (missing openpi_client).
-        if inference_mode not in ("sync", "async", "async_rate_limited"):
+        valid_modes = ("sync", "async", "async_rate_limited", "async_rtc")
+        if inference_mode not in valid_modes:
             raise ValueError(
-                f"inference_mode must be one of 'sync', 'async', 'async_rate_limited'; got {inference_mode!r}"
+                f"inference_mode must be one of {valid_modes}; got {inference_mode!r}"
             )
         if inference_mode == "async_rate_limited" and (inference_interval_s is None or inference_interval_s <= 0):
             raise ValueError("inference_mode='async_rate_limited' requires inference_interval_s > 0")
@@ -145,9 +180,14 @@ class AsyncDiffusionAgent(PolicyAgent):
         self.inference_interval_s = inference_interval_s
         self.min_smoothed_actions = int(min_smoothed_actions)
         self.max_smoothed_actions = int(max_smoothed_actions)
+        # Rate cap is orthogonal to mode: any async mode can be rate-limited by
+        # setting inference_interval_s > 0. REQUIRED when mode=async_rate_limited
+        # (validated above). OPTIONAL (off by default) when mode=async_rtc —
+        # useful when the server is so fast that flat-out inference produces
+        # ~100% chunk overlap and you'd rather space requests out.
         self.inference_interval_rate = (
             Rate(1.0 / inference_interval_s, rate_name="inference_interval")
-            if inference_mode == "async_rate_limited"
+            if inference_interval_s is not None and inference_interval_s > 0
             else None
         )
         self.config = model_io_config or ModelIOConfig()
@@ -159,7 +199,17 @@ class AsyncDiffusionAgent(PolicyAgent):
         self.action_counter = 0
         self._stop = threading.Event()
 
-        if inference_mode in ("async", "async_rate_limited"):
+        # RTC state — derived directly from inference_mode.
+        self._rtc_enabled = inference_mode == "async_rtc"
+        self._rtc_execution_horizon = rtc_execution_horizon
+        self._rtc_consumer_rate_hz = float(rtc_consumer_rate_hz)
+        self._rtc_delay_ema_ticks: float = 0.0   # exponential moving average
+        self._rtc_delay_ema_alpha: float = 0.3
+        self._rtc_max_guidance_weight = rtc_max_guidance_weight
+        self._rtc_debug = bool(rtc_debug)
+        self._rtc_last_tail: np.ndarray | None = None   # for client-side chunk-jump log
+
+        if inference_mode in _ASYNC_MODES:
             self.action_thread = threading.Thread(target=self._action_loop, name="AsyncDiffusionAgent_inference", daemon=True)
             self.action_thread.start()
             self._agent = None
@@ -183,6 +233,8 @@ class AsyncDiffusionAgent(PolicyAgent):
             "inference_interval_s": self.inference_interval_s,
             "min_smoothed_actions": self.min_smoothed_actions,
             "max_smoothed_actions": self.max_smoothed_actions,
+            "rtc_enabled": self._rtc_enabled,
+            "rtc_execution_horizon": self._rtc_execution_horizon,
             **self._websocket_client_policy.get_server_metadata(),
         }
 
@@ -343,11 +395,76 @@ class AsyncDiffusionAgent(PolicyAgent):
                 continue
 
             with self.obs_lock:
-                current_obs = self._obs
+                current_obs = dict(self._obs)   # shallow copy so we can add RTC fields
             with self.action_lock:
                 start_inference_action_counter = self.action_counter
+                # RTC: capture the unexecuted tail of the current chunk as the
+                # prefix we want the server to stay coherent with.
+                if self._rtc_enabled and self.last_actions is not None:
+                    unexecuted_tail = self.last_actions[start_inference_action_counter:]
+                    # PAD TO FIXED LENGTH (action_horizon) — the server's
+                    # sample_actions_rtc is JIT-compiled, and JAX re-JITs on
+                    # every new input shape. If we send a variable-length
+                    # prefix (which naturally shrinks as action_counter advances)
+                    # we trigger a fresh compile (~10 s!) every inference.
+                    # Padding with the tail's last action makes the "unused"
+                    # positions request zero-change — server weights these at
+                    # execution_horizon and below, so the padded region is
+                    # effectively ignored.
+                    T = self.action_horizon
+                    tail_len = unexecuted_tail.shape[0]
+                    if tail_len >= T:
+                        rtc_prefix = np.ascontiguousarray(unexecuted_tail[:T], dtype=np.float32)
+                    elif tail_len > 0:
+                        pad = np.broadcast_to(unexecuted_tail[-1:], (T - tail_len, unexecuted_tail.shape[1]))
+                        rtc_prefix = np.ascontiguousarray(
+                            np.concatenate([unexecuted_tail, pad], axis=0), dtype=np.float32
+                        )
+                    else:
+                        rtc_prefix = None
+                    # Note how many of the T positions are "real" — server
+                    # uses execution_horizon to weight only those.
+                    real_prefix_len = int(min(max(tail_len, 0), T))
+                else:
+                    rtc_prefix = None
+                    real_prefix_len = 0
 
+            if rtc_prefix is not None and real_prefix_len > 0:
+                current_obs["action_prefix"] = rtc_prefix
+                current_obs["inference_delay"] = round(self._rtc_delay_ema_ticks)
+                # Tell the server how many of the T positions actually represent
+                # committed future actions; the rest are padding that should
+                # not be guided toward.
+                current_obs["execution_horizon"] = (
+                    int(self._rtc_execution_horizon)
+                    if self._rtc_execution_horizon is not None
+                    else real_prefix_len
+                )
+                if self._rtc_max_guidance_weight is not None:
+                    current_obs["max_guidance_weight"] = float(self._rtc_max_guidance_weight)
+                if self._rtc_debug:
+                    current_obs["rtc_debug"] = True
+
+            # Snapshot the last action we'll be playing before this inference
+            # returns — used to measure the chunk-jump at merge time below.
+            if self._rtc_debug and self.last_actions is not None:
+                with self.action_lock:
+                    tail_idx = min(self.action_counter + 1, self.last_actions.shape[0] - 1)
+                    self._rtc_last_tail = self.last_actions[tail_idx].copy()
+            else:
+                self._rtc_last_tail = None
+
+            t_infer_start = time.monotonic()
             inferred_action = np.asarray(self._websocket_client_policy.infer(current_obs)["actions"])
+            infer_dt_s = time.monotonic() - t_infer_start
+
+            # Update the RTC latency EMA (in consumer ticks) for the *next*
+            # request. This predicts how far ahead the robot will have drifted
+            # by the time that next chunk lands.
+            if self._rtc_enabled:
+                delay_ticks = infer_dt_s * self._rtc_consumer_rate_hz
+                a = self._rtc_delay_ema_alpha
+                self._rtc_delay_ema_ticks = (1.0 - a) * self._rtc_delay_ema_ticks + a * delay_ticks
 
             with self.action_lock:
                 complete_inference_action_counter = self.action_counter
@@ -370,6 +487,20 @@ class AsyncDiffusionAgent(PolicyAgent):
 
                 if self.last_actions is None:
                     self.last_actions = new_action
+                elif new_action.shape[0] < 2 and self.last_actions.shape[0] >= 2:
+                    # Degenerate new chunk (inference was so slow the time-align
+                    # skip ate almost everything — typically the first RTC call
+                    # while the server JIT compiles the sample_actions_rtc
+                    # graph, ~10s on a cold start). Commit the sacrifice: hold
+                    # the existing buffer, repeat its last action until the
+                    # next (now-warm) inference lands. Avoids an IndexError in
+                    # select_action and a worse 'held empty chunk' behaviour.
+                    print(
+                        f"[AsyncDiffusionAgent] discarding length-{new_action.shape[0]} chunk "
+                        f"(consumed_during_inference={consumed_during_inference}, "
+                        f"infer_dt={infer_dt_s*1e3:.0f}ms) — keeping old buffer"
+                    )
+                    # Don't reset counter; keep repeating the old buffer's tail.
                 else:
                     remaining_actions = self.last_actions[self.action_counter :]
                     # Dynamic blend length: scale with how many actions the consumer
@@ -388,9 +519,28 @@ class AsyncDiffusionAgent(PolicyAgent):
                         self.last_actions = new_action
                     self.action_counter = 0
 
+                # Client-side RTC diagnostics: how far is the first action of
+                # the new chunk from the last action we were about to play?
+                # Big jumps are what cause "arm shoots forward" — RTC should
+                # keep this small when it's working.
+                if self._rtc_debug and self._rtc_last_tail is not None:
+                    new_head = np.asarray(new_action[0])
+                    jump = new_head - self._rtc_last_tail
+                    arm_norm = float(np.linalg.norm(jump[:6])) if jump.shape[0] >= 6 else float("nan")
+                    full_norm = float(np.linalg.norm(jump))
+                    print(
+                        f"[AsyncDiffusionAgent.rtc] chunk-jump  full_norm={full_norm:.4f}  "
+                        f"arm_norm={arm_norm:.4f}  consumed_during_inference={consumed_during_inference}  "
+                        f"infer_dt={infer_dt_s*1e3:.0f}ms  "
+                        f"server_chunk_len={server_chunk_len}  new_len={new_action.shape[0]}  "
+                        f"delay_ema_ticks={self._rtc_delay_ema_ticks:.1f}"
+                    )
+
             if self.inference_interval_rate is not None:
+                # Universal rate cap: applies to any async mode (async,
+                # async_rate_limited, async_rtc) when inference_interval_s > 0.
                 self.inference_interval_rate.sleep()
-            # inference_mode == "async": no sleep, loop back immediately (flat-out)
+            # else: flat-out, loop back immediately.
 
     def select_action(self) -> np.ndarray:
         # Wait for the first inference to land.
@@ -399,13 +549,23 @@ class AsyncDiffusionAgent(PolicyAgent):
         if self._stop.is_set():
             raise RuntimeError("AsyncDiffusionAgent was closed before the first action became available")
         with self.action_lock:
-            idx = min(self.action_counter, self.action_horizon - 1)
+            # Cap by the CURRENT buffer length, not action_horizon — a slow
+            # inference (e.g. first-RTC-call JIT compile, 10s) plus the
+            # time-align skip can leave self.last_actions much shorter than
+            # action_horizon. Capping by action_horizon would index out of
+            # bounds on the short buffer and crash the subprocess.
+            buf_len = self.last_actions.shape[0]
+            idx = min(self.action_counter, buf_len - 1)
             action = self.last_actions[idx]
-            if self.action_counter >= self.action_horizon - 1:
-                # Inference lagging — hold the final action of the current chunk.
-                # A warning is printed at most once per chunk boundary.
-                if self.action_counter == self.action_horizon - 1:
-                    print(f"[AsyncDiffusionAgent] inference lag — repeating action at counter {self.action_counter}")
+            if self.action_counter >= buf_len - 1:
+                # Inference lagging — hold the final action of the current
+                # buffer (we're repeating until a new chunk lands).
+                if self.action_counter == buf_len - 1:
+                    print(
+                        f"[AsyncDiffusionAgent] inference lag — repeating action at "
+                        f"counter {self.action_counter} (buf_len={buf_len}, "
+                        f"action_horizon={self.action_horizon})"
+                    )
             else:
                 self.action_counter += 1
         return action

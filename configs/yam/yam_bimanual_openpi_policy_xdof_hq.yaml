@@ -25,17 +25,61 @@ nodes:
   - type: AgentNode
     name: openpi_policy
     agent_class: robots_realtime.agents.policy_learning.async_pi0_agent:AsyncDiffusionAgent
+    #
+    # ── AsyncDiffusionAgent kwargs by mode ──────────────────────────────────
+    #
+    # Knob                    sync     async    async_rate_limited  async_rtc
+    # ─────────────────────────────────────────────────────────────────────
+    # action_horizon          used     used     used                used
+    # inference_interval_s    ignored  opt cap  REQUIRED            opt cap
+    # min/max_smoothed_actions N/A*    used     used                irrelevant†
+    # rtc_execution_horizon   N/A      N/A      N/A                 used
+    # rtc_consumer_rate_hz    N/A      N/A      N/A                 used (EMA)
+    # rtc_max_guidance_weight N/A      N/A      N/A                 used (clamp)
+    #
+    #   * sync uses openpi's ActionChunkBroker which hard-swaps chunks; no
+    #     client-side blend is applied.
+    #   † in async_rtc the SERVER aligns new chunks to the action_prefix, so
+    #     the client-side linear-ramp blend is redundant. Leaving the knobs
+    #     at their defaults is fine — they run harmlessly on the tail of the
+    #     new chunk where the server guidance weight is already 0.
+    #
+    # inference_interval_s is a UNIVERSAL rate cap — any value > 0 sleeps
+    # between inferences regardless of whether RTC is on. Use this on fast
+    # GPUs (e.g. RTX 5090) where flat-out inference re-fires every ~50 ms
+    # and heavily overlaps chunks.
+    #
+    # async_rtc REQUIRES the matching openpi fork with sample_actions_rtc
+    # and obs["action_prefix"] plumbing (openpi/src/openpi/{policies/policy.py,
+    # models/pi0.py}). With stock openpi, use async or async_rate_limited.
+    #
     agent_kwargs:
       ip: 127.0.0.1
       port: 8012
       action_horizon: 30
-      inference_mode: async_rate_limited            # sync | async | async_rate_limited
-      inference_interval_s: 0.7       # only used when inference_mode=async_rate_limited
-      # Chunk-boundary blend auto-scales with inference latency:
-      # num_smoothed = clip(consumed_during_inference, min, max),
-      # also capped by remaining old-chunk and new-chunk lengths.
-      min_smoothed_actions: 1
-      max_smoothed_actions: 10
+      inference_mode: async_rtc                 # sync | async | async_rate_limited | async_rtc
+      inference_interval_s: 0.7                 # rate cap in seconds (None = flat-out async)
+      # min_smoothed_actions: 1                 # only meaningful for async / async_rate_limited
+      # max_smoothed_actions: 10                # (ignored in sync and effectively unused in async_rtc)
+      # rtc_execution_horizon: 12               # async_rtc only; None → server's action_horizon
+      rtc_consumer_rate_hz: 30                  # async_rtc only; converts latency → inference_delay ticks
+      # Upper clamp on RTC guidance weight (server side). With the prefix now
+      # normalized into model-space by Policy._rtc_action_normalizer, a
+      # moderate value (1–2) should keep the guided v_t on the same side as
+      # the base v_t while still tracking the prefix. If the arm is still
+      # jerky, drop to 0.5. If the [rtc] log shows |corr| << |v_t| and
+      # chunk-boundary jitter persists, raise to 3–5.
+      rtc_max_guidance_weight: 1.0
+      # rtc_debug controls the CLIENT-side chunk-jump log. Server-side per-
+      # denoising-step stats are controlled independently by the RTC_DEBUG
+      # env var on the server process (those prints add real latency via
+      # host-device sync so they're OFF by default):
+      #   RTC_DEBUG=1 uv run scripts/serve_policy.py ...
+      # To see whether the server is re-JIT'ing every inference (bad!):
+      #   JAX_LOG_COMPILES=1 uv run scripts/serve_policy.py ...
+      # Each compile prints one log line — you should see it at startup, then
+      # once more on the first RTC inference, then nothing for subsequent ones.
+      rtc_debug: true
       use_joint_state_as_action: false
     state_topics:
       left:  yam_left/joint_state       # flatten → left-joint_pos, left-gripper_pos
@@ -54,7 +98,7 @@ nodes:
     cmd_topic: openpi_policy/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
-    startup_joint_pos: [-0.0235, 1.56242, 0.3495, 0.95763, -0.16537, -0.02913, 0.99875]
+    startup_joint_pos: [-0.0235, 1.56242, 0.3495, 0.95763, -0.11537, -0.02913, 0.99875]
     startup_duration_s: 2.0
 
   - type: RobotNode
