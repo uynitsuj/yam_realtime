@@ -69,7 +69,7 @@ nodes:
       # the base v_t while still tracking the prefix. If the arm is still
       # jerky, drop to 0.5. If the [rtc] log shows |corr| << |v_t| and
       # chunk-boundary jitter persists, raise to 3–5.
-      rtc_max_guidance_weight: 2.0
+      rtc_max_guidance_weight: 3.0
       # rtc_debug controls the CLIENT-side chunk-jump log. Server-side per-
       # denoising-step stats are controlled independently by the RTC_DEBUG
       # env var on the server process (those prints add real latency via
