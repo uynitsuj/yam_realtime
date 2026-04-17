@@ -23,15 +23,15 @@ Four inference modes (``inference_mode`` kwarg):
     async               — background thread, runs inference flat-out by default.
     async_rate_limited  — background thread, rate-capped (``inference_interval_s``
                           REQUIRED).
-    async_rtc           — background thread + Real-Time Chunking. Each inference
-                          sends the unexecuted tail of the current chunk as
-                          ``action_prefix`` plus a rolling-average
-                          ``inference_delay``; server-side flow-matching
-                          guidance (see openpi pi0.sample_actions_rtc) keeps
-                          new-chunk early steps coherent with what the robot
-                          is already committed to executing. Fixes chunk-
-                          boundary jitter at the model level; incompatible
-                          with sync (no leftover prefix to send).
+    async_rtc           — background thread + Real-Time Chunking, using
+                          the paper-correct SCHEDULED cadence: one inference
+                          per chunk cycle, triggered when the buffer has
+                          ≈ d_est actions remaining (d_est = rolling-EMA
+                          inference latency in consumer ticks). When the
+                          chunk lands, the old buffer has drained to ~0
+                          remaining and the new chunk's [d_actual:] tail
+                          replaces it seamlessly. Matches LeRobot's
+                          ActionQueue replace-on-merge semantics.
 
 ``inference_interval_s`` is an **orthogonal** rate cap: REQUIRED for
 ``async_rate_limited``, OPTIONAL for ``async`` and ``async_rtc`` (``None`` =
@@ -57,6 +57,28 @@ from robots_realtime.robots.utils import Rate
 
 InferenceMode = Literal["sync", "async", "async_rate_limited", "async_rtc"]
 _ASYNC_MODES = ("async", "async_rate_limited", "async_rtc")
+
+ImagePreprocess = Literal["center_crop", "pad"]
+
+
+def _center_crop_and_resize(img: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+    """Center-crop to the largest square that fits, then resize to (target_h, target_w).
+
+    Must match the training augmentation for the deployed checkpoint.
+    Lab42's OpenPI bimanual YAM runs use center-crop; choose the matching
+    strategy per-model via ``AsyncDiffusionAgent(image_preprocess=...)``.
+
+    Strategy: `min(H, W)`-sized square centered on (H/2, W/2), scaled to the
+    target. Discards peripheral FOV instead of showing black bars to the model.
+    """
+    h, w = img.shape[:2]
+    side = min(h, w)
+    h0 = (h - side) // 2
+    w0 = (w - side) // 2
+    cropped = img[h0:h0 + side, w0:w0 + side]
+    # Already square — resize_with_pad here adds zero padding, just rescales.
+    from openpi_client.image_tools import resize_with_pad  # noqa: PLC0415
+    return resize_with_pad(cropped, target_h, target_w)
 
 
 @dataclass
@@ -140,6 +162,14 @@ class AsyncDiffusionAgent(PolicyAgent):
         # magnitude between the tail of the old chunk and the head of the new
         # one — catches "shoots forward" events where RTC pulled too hard.
         rtc_debug: bool = False,
+        # MUST match the training-time image augmentation for your checkpoint.
+        #   "center_crop": crop to a min(H,W)-sized square from the centre,
+        #                  then resize. Discards peripheral FOV. Lab42 / PI
+        #                  YAM checkpoints use this.
+        #   "pad":         preserve full FOV, letterbox with black bars.
+        # Mismatch = the model sees out-of-distribution inputs (black bars
+        # or wrong FOV) and can produce unsafe actions.
+        image_preprocess: ImagePreprocess = "center_crop",
     ) -> None:
         # Validate config first — user-error (bad mode) should surface before
         # env-error (missing openpi_client).
@@ -148,6 +178,11 @@ class AsyncDiffusionAgent(PolicyAgent):
             raise ValueError(
                 f"inference_mode must be one of {valid_modes}; got {inference_mode!r}"
             )
+        if image_preprocess not in ("center_crop", "pad"):
+            raise ValueError(
+                f"image_preprocess must be 'center_crop' or 'pad'; got {image_preprocess!r}"
+            )
+        self._image_preprocess: ImagePreprocess = image_preprocess
         if inference_mode == "async_rate_limited" and (inference_interval_s is None or inference_interval_s <= 0):
             raise ValueError("inference_mode='async_rate_limited' requires inference_interval_s > 0")
         if min_smoothed_actions < 0 or max_smoothed_actions < 0:
@@ -292,7 +327,11 @@ class AsyncDiffusionAgent(PolicyAgent):
         images: Dict[str, Any] = {}
         for k in self.config.image_keys:
             img = flat[k]
-            img = self._image_tools.convert_to_uint8(self._image_tools.resize_with_pad(img, 224, 224))
+            if self._image_preprocess == "center_crop":
+                img = _center_crop_and_resize(img, 224, 224)
+            else:  # "pad"
+                img = self._image_tools.resize_with_pad(img, 224, 224)
+            img = self._image_tools.convert_to_uint8(img)
             img = np.transpose(img, (2, 0, 1))
             images[k] = img
 
@@ -393,6 +432,37 @@ class AsyncDiffusionAgent(PolicyAgent):
             if self._obs is None:
                 time.sleep(0.01)
                 continue
+
+            # SCHEDULED trigger for RTC (paper-correct pattern, matches
+            # LeRobot's intended ActionQueue cadence):
+            #
+            # In async_rtc, fire inference exactly ONCE per chunk cycle,
+            # at the moment the remaining buffer has ≈ d_est actions left.
+            # That way, when the new chunk lands after d_actual ticks, the
+            # consumer has drained the old chunk down to ~0 remaining and
+            # we swap in the new chunk's [d_actual:] tail seamlessly.
+            #
+            # Non-RTC async modes stay flat-out / rate-capped (no trigger
+            # gate) since they don't send a prefix and have no cycle to
+            # align with.
+            if (
+                self._rtc_enabled
+                and self.last_actions is not None
+                and not self._stop.is_set()
+            ):
+                # Always leave a minimum safety margin so a first-inference
+                # JIT-compile stall doesn't drain the chunk past empty.
+                d_est = max(5, round(self._rtc_delay_ema_ticks))
+                while not self._stop.is_set():
+                    with self.action_lock:
+                        la = self.last_actions
+                        buf_len = la.shape[0] if la is not None else 0
+                        remaining = buf_len - self.action_counter
+                    if remaining <= d_est:
+                        break
+                    time.sleep(0.005)
+                if self._stop.is_set():
+                    return
 
             with self.obs_lock:
                 current_obs = dict(self._obs)   # shallow copy so we can add RTC fields
@@ -536,9 +606,11 @@ class AsyncDiffusionAgent(PolicyAgent):
                         f"delay_ema_ticks={self._rtc_delay_ema_ticks:.1f}"
                     )
 
-            if self.inference_interval_rate is not None:
-                # Universal rate cap: applies to any async mode (async,
-                # async_rate_limited, async_rtc) when inference_interval_s > 0.
+            # Rate cap. async_rtc paces itself via the scheduled trigger at
+            # the top of the loop (one inference per chunk cycle), so the
+            # rate cap would double-pace — skip it there. Pure async keeps
+            # it if configured.
+            if self.inference_interval_rate is not None and not self._rtc_enabled:
                 self.inference_interval_rate.sleep()
             # else: flat-out, loop back immediately.
 
