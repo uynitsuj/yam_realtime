@@ -119,6 +119,40 @@ class ModelIOConfig:
     )
 
 
+class _InferTimingReporter:
+    """Rolls up server-reported infer timing and effective rate, logs every ~2 s.
+
+    Ground truth for answering "is inference firing once per chunk, or more?".
+    Avoids a per-call print (noisy) while surfacing when something is off.
+    """
+
+    def __init__(self, name: str, report_interval_s: float = 2.0) -> None:
+        self._name = name
+        self._report_interval_s = float(report_interval_s)
+        self._calls = 0
+        self._sum_ms = 0.0
+        self._last_ms = 0.0
+        self._window_start = time.monotonic()
+
+    def record(self, server_timing: Dict[str, Any]) -> None:
+        ms = float(server_timing.get("infer_ms", 0.0))
+        self._last_ms = ms
+        self._sum_ms += ms
+        self._calls += 1
+        now = time.monotonic()
+        elapsed = now - self._window_start
+        if elapsed >= self._report_interval_s:
+            hz = self._calls / elapsed if elapsed > 0 else 0.0
+            avg = self._sum_ms / self._calls if self._calls else 0.0
+            print(
+                f"[{self._name}] server infer: {self._calls} calls in {elapsed:.2f}s "
+                f"→ {hz:.2f} Hz, avg {avg:.1f} ms, last {self._last_ms:.1f} ms"
+            )
+            self._calls = 0
+            self._sum_ms = 0.0
+            self._window_start = now
+
+
 def _recursive_flatten(obj: Any, prefix: str = "", sep: str = "-") -> Dict[str, Any]:
     """Flatten a nested dict into {key: value} with ``sep``-joined paths.
 
@@ -226,8 +260,24 @@ class AsyncDiffusionAgent(PolicyAgent):
 
         self._image_tools = image_tools
 
+        # Last preprocessed images in HWC uint8 form (pre-transpose) — exposed
+        # to consumers via ``act()["_images"]`` so a monitor can display exactly
+        # what the model sees without running the preproc pipeline twice.
+        self._last_display_images: Dict[str, np.ndarray] = {}
+
         self.use_joint_state_as_action = use_joint_state_as_action
         self._websocket_client_policy = _websocket_client_policy.WebsocketClientPolicy(host=ip, port=port)
+        # Wrap infer() to observe server-reported inference time on every real
+        # server hit. In sync mode the ActionChunkBroker calls this once per
+        # chunk; in async modes the _action_loop calls it directly. This is the
+        # ground-truth inference rate regardless of which path is active.
+        self._infer_timer = _InferTimingReporter(name=f"{type(self).__name__}")
+        _raw_infer = self._websocket_client_policy.infer
+        def _infer_instrumented(obs, _raw=_raw_infer, _rep=self._infer_timer):
+            response = _raw(obs)
+            _rep.record(response.get("server_timing") or {})
+            return response
+        self._websocket_client_policy.infer = _infer_instrumented
 
         self.action_horizon = action_horizon
         self.inference_mode: InferenceMode = inference_mode
@@ -363,6 +413,7 @@ class AsyncDiffusionAgent(PolicyAgent):
         state = np.concatenate(flat_state, axis=-1)
 
         images: Dict[str, Any] = {}
+        display_images: Dict[str, np.ndarray] = {}
         for k in self.config.image_keys:
             img = flat[k]
             if self._image_preprocess == "center_crop":
@@ -370,8 +421,12 @@ class AsyncDiffusionAgent(PolicyAgent):
             else:  # "pad"
                 img = self._image_tools.resize_with_pad(img, 224, 224)
             img = self._image_tools.convert_to_uint8(img)
-            img = np.transpose(img, (2, 0, 1))
-            images[k] = img
+            # Strip the suffix shared across flattened keys ("-images-rgb") so
+            # the published topic reads openpi_policy/image/left_camera etc.
+            display_label = k.split("-", 1)[0]
+            display_images[display_label] = img
+            images[k] = np.transpose(img, (2, 0, 1))
+        self._last_display_images = display_images
 
         return {"state": state, **images}
 
@@ -415,6 +470,9 @@ class AsyncDiffusionAgent(PolicyAgent):
             # this as meta and publishes it on a dedicated topic instead of as
             # a joint_pos command.
             "_chunk": self._snapshot_chunk(),
+            # Exact frames fed to the policy (post center-crop/pad, HWC uint8)
+            # so downstream viewers don't duplicate the preprocessing pipeline.
+            "_images": dict(self._last_display_images),
         }
 
     def _snapshot_chunk(self) -> Dict[str, Any] | None:

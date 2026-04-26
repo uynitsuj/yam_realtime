@@ -154,6 +154,10 @@ nodes:
     name: viz
     port: 8080
     viz_freq: 20
+    # Frames from openpi_policy/image/* are already 224×224 (center-cropped by
+    # the agent). Match preview to the same square so resize_with_pad is a
+    # no-op — otherwise it letterboxes with black bars.
+    preview_size: [224, 224]
     auto_open_browser: true
     fullscreen: true
     up_axis: "+z"
@@ -192,7 +196,11 @@ nodes:
         extrinsic:
           position: [0.0, -0.61, 0.0]
           rotation: [1.0, 0.0, 0.0, 0.0]
+    # Subscribe to the agent's republished, preprocessed frames — the exact
+    # images the policy consumes (post center-crop, 224×224, uint8). This
+    # avoids running the preprocessing pipeline a second time inside the
+    # monitor and guarantees visual fidelity to the model input.
     image_topics:
-      top:   camera_top/rgb
-      left:  camera_left/rgb
-      right: camera_right/rgb
+      top:   openpi_policy/image/top_camera
+      left:  openpi_policy/image/left_camera
+      right: openpi_policy/image/right_camera

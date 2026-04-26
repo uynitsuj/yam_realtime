@@ -5,6 +5,7 @@ Renders at 10 Hz.  Keyboard shortcuts work in the same terminal.
 
 from __future__ import annotations
 
+import re
 import sys
 import termios
 import threading
@@ -20,7 +21,12 @@ from rich.table import Table
 from rich.text import Text
 
 
-def _make_table(session) -> Table:
+_ERROR_PATTERN = re.compile(
+    r"\b(ERROR|CRITICAL)\b|Traceback \(most recent call last\)|^\s*\w*(Error|Exception):"
+)
+
+
+def _make_table(session, nodes_with_errors: set[str] | None = None) -> Table:
     table = Table(
         show_header=True,
         header_style="bold dim",
@@ -34,17 +40,22 @@ def _make_table(session) -> Table:
     table.add_column("PUB(HZ)",    justify="right")
     table.add_column("TOPICS", style="dim")
 
+    errs = nodes_with_errors or set()
     for st in session.node_statuses():
         dot   = Text("● ", style="green") if st.alive else Text("○ ", style="red")
         label = Text("live" if st.alive else "dead", style="green" if st.alive else "red")
-        status_cell = dot + label
+        status_cell = Text()
+        if st.name in errs:
+            status_cell.append("⚠ ", style="bold red")
+        status_cell += dot + label
 
         step_val = f"{st.step_hz:>6.1f}" if st.step_hz > 0 else Text("  ---", style="dim")
         pub_val  = f"{st.pub_hz:>6.1f}"  if st.pub_hz  > 0 else Text("  ---", style="dim")
 
         topics = ", ".join(t for t in st._timestamps.keys() if not t.startswith("_")) or "—"
 
-        table.add_row(st.name, status_cell, step_val, pub_val, topics)
+        name_cell = Text(st.name, style="bold red" if st.name in errs else "bold")
+        table.add_row(name_cell, status_cell, step_val, pub_val, topics)
 
     return table
 
@@ -115,21 +126,47 @@ def _tail_file(path: Path, n: int) -> list[str]:
         return []
 
 
-def _log_text(log_dir: Path | None, n_lines: int = 8) -> Text:
-    """Tailed log output from all node log files as a single Text block."""
+def _scan_log_tail(
+    log_dir: Path | None, n_lines: int
+) -> tuple[list[tuple[str, str, bool]], set[str]]:
+    """Tail each *.log and classify lines.
+
+    Returns (tagged_lines, nodes_with_errors):
+      tagged_lines: list of (node_name, line, is_error)
+      nodes_with_errors: set of node names that emitted an error within the tail
+    """
+    tagged: list[tuple[str, str, bool]] = []
+    err_nodes: set[str] = set()
     if log_dir is None or not log_dir.exists():
-        return Text("")
+        return tagged, err_nodes
 
-    all_lines: list[str] = []
     for lf in sorted(log_dir.glob("*.log")):
+        node_name = lf.stem
         for line in _tail_file(lf, n_lines):
-            all_lines.append(f"[{lf.stem}] {line}")
+            is_err = bool(_ERROR_PATTERN.search(line))
+            if is_err:
+                err_nodes.add(node_name)
+            tagged.append((node_name, line, is_err))
+    return tagged, err_nodes
 
-    return Text("\n".join(all_lines[-n_lines:]), style="dim", overflow="fold")
+
+def _log_text(tagged_lines: list[tuple[str, str, bool]], n_lines: int) -> Text:
+    """Render the tail as a single Text block, coloring error lines red."""
+    tail = tagged_lines[-n_lines:]
+    out = Text(overflow="fold")
+    for i, (node, line, is_err) in enumerate(tail):
+        if i > 0:
+            out.append("\n")
+        out.append(f"[{node}] ", style="dim")
+        out.append(line, style="bold red" if is_err else "dim")
+    return out
 
 
 def _render(session, n_log_lines: int = 8) -> Panel:
-    node_table = _make_table(session)
+    log_dir = getattr(session, "log_dir", None)
+    tagged_lines, err_nodes = _scan_log_tail(log_dir, n_log_lines)
+
+    node_table = _make_table(session, nodes_with_errors=err_nodes)
     rec_line   = _recording_line(session)
     help_line  = _help_line(session)
 
@@ -145,11 +182,10 @@ def _render(session, n_log_lines: int = 8) -> Panel:
     content.add_row(Rule(style="dim"))
     content.add_row(Columns([rec_line, help_line], expand=True))
 
-    log_dir = getattr(session, "log_dir", None)
     if log_dir is not None:
         content.add_row(Rule(style="dim"))
         content.add_row(Text(f"  logs: {log_dir}", style="dim"))
-        content.add_row(_log_text(log_dir, n_lines=n_log_lines))
+        content.add_row(_log_text(tagged_lines, n_lines=n_log_lines))
 
     return Panel(content, title="[bold]robots_realtime[/bold]", border_style="dim")
 

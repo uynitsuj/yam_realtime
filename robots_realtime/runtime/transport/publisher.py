@@ -46,17 +46,29 @@ class Publisher:
         # Give the slow-joiner a moment to let subscriptions propagate
         time.sleep(0.01)
 
-    def publish(self, topic_suffix: str, data: dict, ts: float | None = None) -> bool:
+    def publish(
+        self,
+        topic_suffix: str,
+        data: dict,
+        ts: float | None = None,
+        record: bool = True,
+    ) -> bool:
         """Send ``data`` on ``"{node_name}/{topic_suffix}"``.
 
-        Always records to the writer (if open) at the full call rate.
+        Records to the writer (if open) at the full call rate, unless ``record``
+        is False or the topic is internal (prefixed with ``_``).
+
         Returns True if the message was sent on the bus, False if throttled.
         """
         now = time.time()
         ts_val = ts if ts is not None else now
 
-        # Always record at full poll rate; skip internal topics (prefixed with _)
-        if self._writer is not None and self._writer.is_open and not topic_suffix.startswith("_"):
+        if (
+            record
+            and self._writer is not None
+            and self._writer.is_open
+            and not topic_suffix.startswith("_")
+        ):
             self._writer.write(topic_suffix, ts_val, data)
 
         # Throttle ZMQ bus sends

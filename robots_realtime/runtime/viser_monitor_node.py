@@ -125,6 +125,10 @@ class ViserMonitorNode(Node):
         image_topics: dict[str, str] | None = None,
         viz_freq: float = 20.0,
         preview_size: tuple[int, int] = (224, 224),
+        # How to shape image thumbnails. Use ``center_crop`` + a square
+        # ``preview_size`` to display exactly what the policy consumes
+        # (matches AsyncDiffusionAgent's ``image_preprocess`` path).
+        image_preprocess: str = "pad",
         auto_open_browser: bool = True,
         fullscreen: bool = True,
         # Initial 3D camera view — "+x is the direction the arms point", "+z is up".
@@ -166,6 +170,11 @@ class ViserMonitorNode(Node):
             raise ValueError(f"preview_size must be (width, height); got {preview_size!r}")
         self._preview_w = int(preview_size[0])
         self._preview_h = int(preview_size[1])
+        if image_preprocess not in ("pad", "center_crop"):
+            raise ValueError(
+                f"image_preprocess must be 'pad' or 'center_crop'; got {image_preprocess!r}"
+            )
+        self._image_preprocess = image_preprocess
         self._auto_open_browser = bool(auto_open_browser)
         self._fullscreen = bool(fullscreen)
         self._initial_camera_position = tuple(float(v) for v in initial_camera_position)
@@ -545,6 +554,12 @@ class ViserMonitorNode(Node):
             # resize_with_pad takes (image, height, width) — not (w, h). The
             # preview_size kwarg is (width, height) for ergonomic YAML config,
             # so we transpose here.
+            if self._image_preprocess == "center_crop":
+                h, w = img.shape[:2]
+                side = min(h, w)
+                h0 = (h - side) // 2
+                w0 = (w - side) // 2
+                img = img[h0:h0 + side, w0:w0 + side]
             thumb = resize_with_pad(img, self._preview_h, self._preview_w)
             if label not in self._image_handles:
                 self._image_handles[label] = self._server.gui.add_image(thumb, label=label)
@@ -822,6 +837,7 @@ class ViserMonitorNode(Node):
             "image_topics":            params.get("image_topics") or {},
             "viz_freq":                params.get("viz_freq", 20.0),
             "preview_size":            tuple(params.get("preview_size", (240, 180))),
+            "image_preprocess":        params.get("image_preprocess", "pad"),
             "auto_open_browser":       params.get("auto_open_browser", True),
             "fullscreen":              params.get("fullscreen", True),
             "initial_camera_position": tuple(params.get("initial_camera_position", (-1.3, 0.3, 0.9))),

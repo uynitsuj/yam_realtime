@@ -158,6 +158,23 @@ class AgentNode(Node):
         if chunk is not None:
             self.publish("chunk", chunk, ts=ts)
 
+        # Optional preprocessed-image snapshots — the exact frames fed to the
+        # policy. Mirrored on image/{label} so downstream viewers (viser
+        # monitor) can subscribe without reprocessing raw cameras themselves.
+        # record=False: raw frames are already being written to MP4 by each
+        # CameraNode's AsyncMp4Writer; recording them again here would route
+        # 3× VGA-sized arrays through McapWriter's JSON fallback on the agent's
+        # hot path (~45 ms/step → drops a 30 Hz loop to ~15 Hz during record).
+        images = action.get("_images")
+        if images:
+            for label, img in images.items():
+                self.publish(
+                    f"image/{label}",
+                    {"images": {"rgb": img}},
+                    ts=ts,
+                    record=False,
+                )
+
         self._publish_commands(action, ts)
 
     def _publish_commands(self, action: dict, ts: float) -> None:

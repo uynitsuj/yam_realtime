@@ -158,14 +158,21 @@ class Node(ABC):
     # Transport helpers (available inside step())
     # ------------------------------------------------------------------
 
-    def publish(self, topic_suffix: str, data: dict, ts: float | None = None) -> bool:
+    def publish(
+        self,
+        topic_suffix: str,
+        data: dict,
+        ts: float | None = None,
+        record: bool = True,
+    ) -> bool:
         """Publish data on ``"{self.name}/{topic_suffix}"``.
 
         Also writes to self._writer at every call (full poll rate), and sends
-        on the ZMQ bus throttled by publish_freq.
+        on the ZMQ bus throttled by publish_freq. Pass ``record=False`` to
+        skip the writer for this call (the message still goes on the bus).
         """
         assert self._publisher is not None, "publish() called before run()"
-        return self._publisher.publish(topic_suffix, data, ts=ts)
+        return self._publisher.publish(topic_suffix, data, ts=ts, record=record)
 
     def get_latest(self, topic: str) -> dict | None:
         """Return latest data dict for a subscribed topic, or None."""
