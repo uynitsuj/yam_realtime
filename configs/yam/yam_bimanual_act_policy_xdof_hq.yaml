@@ -1,61 +1,75 @@
 version: "1"
 
-# Bimanual YAM policy deployment via a local ACT (Action Chunking Transformer) model.
-# The policy agent runs inference on a background thread using PyTorch;
-# AgentNode's consumer calls act() at poll_freq and dequeues one action per tick from the
-# chunk buffer. Smoothing across chunk boundaries is handled inside the agent.
+# Bimanual YAM policy deployment via a remote ACT (Action Chunking Transformer)
+# inference server. The policy agent runs in a background thread that fires
+# websocket `infer` calls; AgentNode's consumer calls act() at poll_freq and
+# dequeues one action per tick from the chunk buffer. Smoothing across chunk
+# boundaries is handled inside the agent.
 #
 # Prereqs:
-#   - `act` package installed in this venv (from /path/to/act).
-#   - A trained ACT checkpoint (.pt file).
-#   - Normalization stats JSON matching the training run.
-#   - CUDA GPU available (or set device: cpu for slower inference).
+#   - `openpi_client` installed in this venv.
+#   - ACT inference server reachable at the (ip, port) below. Start it from
+#     the act repo by pointing at any checkpoint in a run dir — the server
+#     auto-resolves the training config (via sibling metadata.json) and the
+#     normalization stats (via sibling norm_stats.json):
+#       uv run scripts/serve_policy.py \
+#         --path runs/<run>/checkpoint_<step>.pt
+#   - can_left / can_right interfaces up at 1 Mbit/s.
+#
+# (For local in-process ACT inference — no server required — use
+# robots_realtime.agents.policy_learning.async_act_agent:AsyncACTAgent
+# directly. That path is still supported but is heavier on this venv.)
 
 session:
   save_root: recordings
+  # Policy-specific safety + ergonomics:
+  #   - start_paused: RobotNode commands are gated on startup so the arm doesn't
+  #     snap to wherever the policy thinks it should be. Hit [space] in the TUI
+  #     to hand off control.
+  #   - record_on_unpause: when the operator unpauses, automatically start an
+  #     episode so every rollout is captured from the instant of handoff.
   start_paused: true
   record_on_unpause: false
 
 nodes:
   - type: AgentNode
     name: act_policy
-    agent_class: robots_realtime.agents.policy_learning.async_act_agent:AsyncACTAgent
+    agent_class: robots_realtime.agents.policy_learning.async_remote_act_agent:AsyncRemoteACTAgent
     agent_kwargs:
-      # ── Model ──────────────────────────────────────────────────────────
-      checkpoint_path: ""                       # Path to trained .pt checkpoint
-      norm_stats_path: ""                       # Path to norm_stats.json
-      use_quantile_norm: true
-      device: cuda
-
-      # ── Architecture (must match training config) ──────────────────────
-      action_dim: 14
-      proprio_dim: 14
-      action_chunk_size: 30
-      backbone: dinov3_vits16
-      encoder_image_size: 256
-      hidden_size: 384
-      num_heads: 12
-      num_blocks: 3
-      relative_actions: false
-      freeze_encoder: true
+      ip: 127.0.0.1
+      port: 8012
+      action_horizon: 30
 
       # ── Inference ──────────────────────────────────────────────────────
       #
-      # Knob                      async    async_rate_limited
-      # ─────────────────────────────────────────────────────
-      # inference_interval_s      opt cap  REQUIRED
-      # min/max_smoothed_actions  used     used
+      # Knob                      sync     async    async_rate_limited  temporal_ensemble
+      # ─────────────────────────────────────────────────────────────────────────────────
+      # action_horizon            used     used     used                used
+      # inference_interval_s      ignored  opt cap  REQUIRED            ignored
+      # min/max_smoothed_actions  N/A*     used     used                N/A†
+      # temporal_ensemble_k       N/A      N/A      N/A                 used
       #
-      inference_mode: async_rate_limited        # async | async_rate_limited
-      inference_interval_s: 0.3
-      min_smoothed_actions: 1
-      max_smoothed_actions: 8
-
-      # ── Delta actions (must match training config) ─────────────────────
-      use_delta_actions: false
-      # delta_action_mask: null                 # e.g. [true,...,true,false,true,...,true,false]
+      #   * sync uses openpi-client's ActionChunkBroker which hard-swaps
+      #     chunks; no client-side blend is applied.
+      #   † temporal_ensemble is paper-faithful (Zhao et al. ACT): blocking
+      #     inference once per consumer tick, then exp(-k * age_index)
+      #     weighted average across every chunk that covers tick t. No
+      #     client-side blend; replaces the linear-ramp scheme entirely.
+      #     Requires inference_time < 1/poll_freq for the consumer rate to
+      #     hold; otherwise the loop just runs as fast as inference allows.
+      #
+      inference_mode: temporal_ensemble         # sync | async | async_rate_limited | temporal_ensemble
+      # inference_interval_s: 0.3
+      # min_smoothed_actions: 1
+      # max_smoothed_actions: 8
+      temporal_ensemble_k: 0.05               # ACT paper default; higher = more weight on older predictions (smoother, laggier)
 
       # ── Image preprocessing (must match training augmentation) ─────────
+      # Image size is auto-resolved from the server's metadata
+      # (ACTPolicy.metadata["encoder_image_size"], matching the trained
+      # ModelConfig). To override (e.g. force a smaller payload over the
+      # wire than the model's native input size), uncomment:
+      # encoder_image_size: 224
       image_preprocess: center_crop             # center_crop | resize
 
       use_joint_state_as_action: false
@@ -75,7 +89,12 @@ nodes:
     cmd_topic: act_policy/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
+    # In-distribution starting pose for tshirt_folding_d405 — joints 1, 2
+    # need to be in roughly [0.5, 2.7] rad for the policy to see a state
+    # it actually trained on. The all-zeros pose puts the arm fully
+    # stretched out, which is OOD and produces erratic predictions.
     startup_joint_pos: [-0.0235, 1.56242, 0.3495, 0.95763, -0.11537, -0.02913, 1.0]
+    # startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
   - type: RobotNode
@@ -85,6 +104,7 @@ nodes:
     poll_freq: 200
     ramp_duration_s: 1.5
     startup_joint_pos: [0.01732, 1.54234, 0.33567, 0.98454, 0.11514, 0.03717, 1.0]
+    # startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
   - type: CameraNode

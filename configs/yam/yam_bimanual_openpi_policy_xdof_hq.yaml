@@ -19,7 +19,7 @@ session:
   #   - record_on_unpause: when the operator unpauses, automatically start an
   #     episode so every rollout is captured from the instant of handoff.
   start_paused: true
-  record_on_unpause: false
+  record_on_unpause: true
 
 nodes:
   - type: AgentNode
@@ -28,14 +28,15 @@ nodes:
     #
     # ── AsyncDiffusionAgent kwargs by mode ──────────────────────────────────
     #
-    # Knob                    sync     async    async_rate_limited  async_rtc
-    # ─────────────────────────────────────────────────────────────────────
-    # action_horizon          used     used     used                used
-    # inference_interval_s    ignored  opt cap  REQUIRED            ignored (scheduled)
-    # min/max_smoothed_actions N/A*    used     used                irrelevant†
-    # rtc_execution_horizon   N/A      N/A      N/A                 used
-    # rtc_consumer_rate_hz    N/A      N/A      N/A                 used (EMA)
-    # rtc_max_guidance_weight N/A      N/A      N/A                 used (clamp)
+    # Knob                    sync     async    async_rate_limited  async_rtc          temporal_ensemble
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────
+    # action_horizon          used     used     used                used               used
+    # inference_interval_s    ignored  opt cap  REQUIRED            ignored (sched.)   ignored
+    # min/max_smoothed_actions N/A*    used     used                irrelevant†        N/A‡
+    # rtc_execution_horizon   N/A      N/A      N/A                 used               N/A
+    # rtc_consumer_rate_hz    N/A      N/A      N/A                 used (EMA)         N/A
+    # rtc_max_guidance_weight N/A      N/A      N/A                 used (clamp)       N/A
+    # temporal_ensemble_k     N/A      N/A      N/A                 N/A                used
     #
     #   * sync uses openpi's ActionChunkBroker which hard-swaps chunks; no
     #     client-side blend is applied.
@@ -43,6 +44,12 @@ nodes:
     #     the client-side linear-ramp blend is redundant. Leaving the knobs
     #     at their defaults is fine — they run harmlessly on the tail of the
     #     new chunk where the server guidance weight is already 0.
+    #   ‡ temporal_ensemble is paper-faithful (Zhao et al. ACT): blocking
+    #     inference once per consumer tick, then exp(-k * age_index) weighted
+    #     average across every chunk that covers tick t. No client-side blend;
+    #     replaces the linear-ramp scheme entirely. Requires
+    #     inference_time < 1/poll_freq for the consumer rate to hold;
+    #     otherwise the loop runs as fast as inference allows.
     #
     # inference_interval_s is a rate cap for `async` only. For `async_rtc`
     # the SCHEDULED trigger paces inference (one per chunk cycle, fired
@@ -52,16 +59,18 @@ nodes:
     # async_rtc REQUIRES the matching openpi fork with sample_actions_rtc
     # and obs["action_prefix"] plumbing (openpi/src/openpi/{policies/policy.py,
     # models/pi0.py}). With stock openpi, use async or async_rate_limited.
+    # temporal_ensemble works against any openpi server (stock or fork).
     #
     agent_kwargs:
       ip: 127.0.0.1
       port: 8012
       action_horizon: 30
-      inference_mode: async_rtc                 # sync | async | async_rate_limited | async_rtc
+      inference_mode: async_rtc                 # sync | async | async_rate_limited | async_rtc | temporal_ensemble
       # inference_interval_s: 0.7                 # rate cap in seconds (None = flat-out async)
       # min_smoothed_actions: 1                 # only meaningful for async / async_rate_limited
       # max_smoothed_actions: 10                # (ignored in sync and effectively unused in async_rtc)
-      rtc_execution_horizon: 25               # async_rtc only; None → server's action_horizon
+      # temporal_ensemble_k: 0.05               # ACT paper default; higher = more weight on older predictions (smoother, laggier)
+      rtc_execution_horizon: 10               # async_rtc only; None → server's action_horizon
       rtc_consumer_rate_hz: 30                  # async_rtc only; converts latency → inference_delay ticks
       # Upper clamp on RTC guidance weight (server side). With the prefix now
       # normalized into model-space by Policy._rtc_action_normalizer, a
@@ -69,7 +78,7 @@ nodes:
       # the base v_t while still tracking the prefix. If the arm is still
       # jerky, drop to 0.5. If the [rtc] log shows |corr| << |v_t| and
       # chunk-boundary jitter persists, raise to 3–5.
-      rtc_max_guidance_weight: 3.0
+      rtc_max_guidance_weight: 4.0
       # rtc_debug controls the CLIENT-side chunk-jump log. Server-side per-
       # denoising-step stats are controlled independently by the RTC_DEBUG
       # env var on the server process (those prints add real latency via
@@ -103,7 +112,7 @@ nodes:
     cmd_topic: openpi_policy/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
-    startup_joint_pos: [-0.0235, 1.56242, 0.3495, 0.95763, -0.11537, -0.02913, 1.0]
+    startup_joint_pos: [-0.0235, 1.36242, 0.3495, 0.95763, -0.11537, -0.02913, 1.0]
     # startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
@@ -113,7 +122,7 @@ nodes:
     cmd_topic: openpi_policy/right_pos
     poll_freq: 200
     ramp_duration_s: 1.5
-    startup_joint_pos: [0.01732, 1.54234, 0.33567, 0.98454, 0.11514, 0.03717, 1.0]
+    startup_joint_pos: [0.01732, 1.34234, 0.33567, 0.98454, 0.11514, 0.03717, 1.0]
     # startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 

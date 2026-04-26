@@ -61,6 +61,14 @@ class RealSenseCamera(CameraDriver):
         resolution: ``"WxH"``, preset name, or ``(w, h)`` tuple. Default ``"VGA"``.
         fps: Frame rate. Default 30.
         auto_exposure: Enable auto-exposure on the stereo / color sensor.
+        manual_exposure_us: When ``auto_exposure=False``, set the color sensor's
+            exposure to this value in microseconds (D405 default 33000μs).
+            Ignored if ``auto_exposure=True``. Useful for locking exposure to a
+            known-good value across cameras when AE drifts per-cam.
+        manual_gain: When ``auto_exposure=False``, set the color sensor's gain
+            (D405 range [16, 248], default 16). Ignored if ``auto_exposure=True``.
+        manual_white_balance_k: If set (Kelvin, e.g. 4600), disables auto WB and
+            locks the color temperature. ``None`` keeps auto WB.
         enable_depth: Also stream the depth channel. Emitted under
             ``CameraData.other_sensors["depth"]`` when available.
     """
@@ -69,6 +77,9 @@ class RealSenseCamera(CameraDriver):
     resolution: Any = "VGA"
     fps: int = 30
     auto_exposure: bool = True
+    manual_exposure_us: Optional[float] = None
+    manual_gain: Optional[float] = None
+    manual_white_balance_k: Optional[float] = None
     enable_depth: bool = False
 
     # Populated in __post_init__; callers should not set these directly.
@@ -150,13 +161,28 @@ class RealSenseCamera(CameraDriver):
             raise last_exc
 
     def _device_has_color_sensor(self) -> bool:
-        """D400 product-line cameras without a dedicated RGB module expose only infrared."""
+        """Whether the target device exposes ``rs.stream.color``.
+
+        Checks the actual stream profiles published by every sensor on the
+        device, not the sensor *name*. Required for the D405: that camera has
+        a single ``'Stereo Module'`` sensor that hosts BOTH ``stream.infrared``
+        AND ``stream.color`` profiles, so a name keyword check ("RGB" /
+        "Color") falsely returns False and the driver falls back to streaming
+        a monochrome IR frame as 3-channel — which is wildly off-distribution
+        from the color RGB feed used during training.
+        """
         rs = self._rs
         ctx = rs.context()
         for dev in ctx.query_devices():
             if self.device_id is None or dev.get_info(rs.camera_info.serial_number) == self.device_id:
-                sensor_names = [s.get_info(rs.camera_info.name) for s in dev.query_sensors()]
-                return any("RGB" in n or "Color" in n for n in sensor_names)
+                for sensor in dev.query_sensors():
+                    for sp in sensor.get_stream_profiles():
+                        try:
+                            if sp.stream_type() == rs.stream.color:
+                                return True
+                        except Exception:
+                            continue
+                return False
         # Device not (yet) enumerable — assume color and let pipeline.start() surface a real error.
         return True
 
@@ -171,10 +197,46 @@ class RealSenseCamera(CameraDriver):
             except Exception:
                 continue
             if "stereo" in name.lower() or "rgb" in name.lower():
+                # Auto-exposure first; some sensors require AE off before
+                # accepting an explicit exposure value.
                 try:
                     sensor.set_option(rs.option.enable_auto_exposure, bool(self.auto_exposure))
                 except Exception as exc:
                     logger.debug("auto_exposure set failed on %s: %s", name, exc)
+                if not self.auto_exposure:
+                    if self.manual_exposure_us is not None and sensor.supports(rs.option.exposure):
+                        try:
+                            sensor.set_option(rs.option.exposure, float(self.manual_exposure_us))
+                            logger.info(
+                                "RealSenseCamera %s: manual exposure %.0fμs",
+                                self.device_id or "auto", self.manual_exposure_us,
+                            )
+                        except Exception as exc:
+                            logger.warning("manual exposure set failed on %s: %s", name, exc)
+                    if self.manual_gain is not None and sensor.supports(rs.option.gain):
+                        try:
+                            sensor.set_option(rs.option.gain, float(self.manual_gain))
+                            logger.info(
+                                "RealSenseCamera %s: manual gain %.1f",
+                                self.device_id or "auto", self.manual_gain,
+                            )
+                        except Exception as exc:
+                            logger.warning("manual gain set failed on %s: %s", name, exc)
+                if self.manual_white_balance_k is not None:
+                    if sensor.supports(rs.option.enable_auto_white_balance):
+                        try:
+                            sensor.set_option(rs.option.enable_auto_white_balance, 0.0)
+                        except Exception as exc:
+                            logger.debug("disable AWB failed on %s: %s", name, exc)
+                    if sensor.supports(rs.option.white_balance):
+                        try:
+                            sensor.set_option(rs.option.white_balance, float(self.manual_white_balance_k))
+                            logger.info(
+                                "RealSenseCamera %s: manual white_balance %.0fK",
+                                self.device_id or "auto", self.manual_white_balance_k,
+                            )
+                        except Exception as exc:
+                            logger.warning("manual white_balance set failed on %s: %s", name, exc)
                 break
 
     def _read_intrinsics(self) -> dict:
