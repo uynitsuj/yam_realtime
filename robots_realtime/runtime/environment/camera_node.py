@@ -6,12 +6,21 @@ giving sub-millisecond accurate per-frame timestamps for post-hoc alignment.
 poll_freq is None by default: the driver's blocking read() call paces the loop
 at the hardware frame rate.  Set poll_freq only for drivers (e.g. bare OpenCV)
 where read() returns immediately and you want an explicit rate cap.
+
+Optional ``publish_resize`` shrinks frames before they hit the bus so consumers
+(e.g. an OpenPI policy that resizes to 224×224 anyway) don't pay full-VGA
+serialization + TCP cost. The on-disk MP4 keeps the full-resolution frame —
+only the bus payload is downsized. Two modes match AsyncDiffusionAgent's
+``image_preprocess``: ``center_crop`` (crop to min(H,W) square then resize)
+and ``pad`` (resize-with-pad / letterbox).
 """
 
 from __future__ import annotations
 
 import importlib
 import time
+
+import numpy as np
 
 from robots_realtime.runtime.node import Node, NodeRole
 from robots_realtime.sensors.cameras.camera import CameraData, CameraDriver
@@ -23,7 +32,35 @@ _CAMERA_DRIVER_REGISTRY: dict[str, str] = {
     "RealSenseCamera":  "robots_realtime.sensors.cameras.realsense_camera:RealSenseCamera",
 }
 
-_NODE_ONLY_KEYS = {"name", "type", "poll_freq"}
+_NODE_ONLY_KEYS = {"name", "type", "poll_freq", "publish_resize", "publish_resize_mode"}
+
+
+def _center_crop_and_resize(img: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+    """Center-crop to the largest square that fits, then resize to (target_h, target_w).
+
+    Mirrors ``AsyncDiffusionAgent._center_crop_and_resize`` so frames published
+    with mode=center_crop are bit-identical to what the policy would produce
+    if it received the full-res frame and ran its own preprocessing.
+    """
+    from openpi_client.image_tools import resize_with_pad  # noqa: PLC0415
+
+    h, w = img.shape[:2]
+    side = min(h, w)
+    h0 = (h - side) // 2
+    w0 = (w - side) // 2
+    cropped = img[h0:h0 + side, w0:w0 + side]
+    return resize_with_pad(cropped, target_h, target_w)
+
+
+def _resize_with_pad(img: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+    from openpi_client.image_tools import resize_with_pad  # noqa: PLC0415
+    return resize_with_pad(img, target_h, target_w)
+
+
+_RESIZE_MODES = {
+    "center_crop": _center_crop_and_resize,
+    "pad": _resize_with_pad,
+}
 
 
 def _instantiate_camera_driver(spec: dict) -> CameraDriver:
@@ -73,12 +110,27 @@ class CameraNode(Node):
         poll_freq: float | None = None,
         writer=None,
         _driver_spec: dict | None = None,
+        publish_resize: tuple[int, int] | list[int] | None = None,
+        publish_resize_mode: str = "center_crop",
         **kwargs,
     ) -> None:
         super().__init__(name=name, writer=writer, **kwargs)
         self._driver = driver
         self._driver_spec = _driver_spec
         self.poll_freq = poll_freq
+
+        if publish_resize is not None:
+            if publish_resize_mode not in _RESIZE_MODES:
+                raise ValueError(
+                    f"[{name}] publish_resize_mode must be one of "
+                    f"{sorted(_RESIZE_MODES)}, got {publish_resize_mode!r}"
+                )
+            h, w = publish_resize
+            self._publish_resize: tuple[int, int] | None = (int(h), int(w))
+            self._publish_resize_fn = _RESIZE_MODES[publish_resize_mode]
+        else:
+            self._publish_resize = None
+            self._publish_resize_fn = None
 
     def setup(self) -> None:
         if self._driver is None:
@@ -112,7 +164,22 @@ class CameraNode(Node):
         if extrinsics is not None:
             msg["extrinsics"] = extrinsics
 
-        self.publish("rgb", msg, ts=ts)
+        if self._publish_resize is None:
+            self.publish("rgb", msg, ts=ts)
+        else:
+            # Bus payload: resized RGB only — depth and intrinsics would need
+            # geometric rescaling to stay consistent with the new pixel grid,
+            # so they're dropped from the bus version. The disk recording
+            # (record_data=msg) keeps everything at full resolution.
+            target_h, target_w = self._publish_resize
+            resized = {
+                k: self._publish_resize_fn(img, target_h, target_w)
+                for k, img in data.images.items()
+            }
+            bus_msg: dict = {"images": resized, "timestamp": ts}
+            if extrinsics is not None:
+                bus_msg["extrinsics"] = extrinsics  # pose is resolution-invariant
+            self.publish("rgb", bus_msg, ts=ts, record_data=msg)
 
         if data.imu_data is not None:
             imu = data.imu_data
@@ -131,6 +198,8 @@ class CameraNode(Node):
         kwargs: dict = {
             "name": params["name"],
             "poll_freq": params.get("poll_freq"),
+            "publish_resize": params.get("publish_resize"),
+            "publish_resize_mode": params.get("publish_resize_mode", "center_crop"),
         }
         if "driver" in params:
             driver_kwargs = {k: v for k, v in params.items() if k not in _NODE_ONLY_KEYS}

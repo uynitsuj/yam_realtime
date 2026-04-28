@@ -19,7 +19,7 @@ session:
   #   - record_on_unpause: when the operator unpauses, automatically start an
   #     episode so every rollout is captured from the instant of handoff.
   start_paused: true
-  record_on_unpause: true
+  record_on_unpause: false
 
 nodes:
   - type: AgentNode
@@ -119,12 +119,21 @@ nodes:
 
   # Three Intel RealSense D405s — same station as the teleop config.
   # Swap the device_id values if the physical mounts don't match the labels.
+  #
+  # publish_resize shrinks the bus payload to the policy's input size
+  # (224×224) so VGA frames don't get serialized + shipped over ZMQ at
+  # ~921 KB ea × 3 cams × 30 Hz. The on-disk MP4 keeps the full-res frame —
+  # only the bus copy is downsized. Mode MUST match the agent's
+  # image_preprocess setting above so what hits the policy matches the
+  # training augmentation.
   - type: CameraNode
     name: camera_top
     driver: RealSenseCamera
     device_id: "218622270376"
     resolution: VGA
     fps: 30
+    publish_resize: [224, 224]
+    publish_resize_mode: center_crop
 
   - type: CameraNode
     name: camera_left
@@ -132,6 +141,8 @@ nodes:
     device_id: "218722271050"
     resolution: VGA
     fps: 30
+    publish_resize: [224, 224]
+    publish_resize_mode: center_crop
 
   - type: CameraNode
     name: camera_right
@@ -139,6 +150,8 @@ nodes:
     device_id: "218622275506"
     resolution: VGA
     fps: 30
+    publish_resize: [224, 224]
+    publish_resize_mode: center_crop
 
   # Live viser monitor — URDF overlays + camera panels, no commands.
   - type: ViserMonitorNode

@@ -52,11 +52,17 @@ class Publisher:
         data: dict,
         ts: float | None = None,
         record: bool = True,
+        record_data: dict | None = None,
     ) -> bool:
         """Send ``data`` on ``"{node_name}/{topic_suffix}"``.
 
         Records to the writer (if open) at the full call rate, unless ``record``
         is False or the topic is internal (prefixed with ``_``).
+
+        ``record_data`` lets a node split bus and disk payloads — write the
+        full-fidelity copy while shipping a smaller one over the wire (e.g.
+        CameraNode resizes frames for the bus but keeps full-res on disk).
+        Defaults to ``data`` when None.
 
         Returns True if the message was sent on the bus, False if throttled.
         """
@@ -69,7 +75,7 @@ class Publisher:
             and self._writer.is_open
             and not topic_suffix.startswith("_")
         ):
-            self._writer.write(topic_suffix, ts_val, data)
+            self._writer.write(topic_suffix, ts_val, data if record_data is None else record_data)
 
         # Throttle ZMQ bus sends
         if self._min_interval:
