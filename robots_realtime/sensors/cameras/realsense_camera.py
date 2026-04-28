@@ -150,13 +150,28 @@ class RealSenseCamera(CameraDriver):
             raise last_exc
 
     def _device_has_color_sensor(self) -> bool:
-        """D400 product-line cameras without a dedicated RGB module expose only infrared."""
+        """Whether the target device exposes ``rs.stream.color``.
+
+        Checks the actual stream profiles published by every sensor on the
+        device, not the sensor *name*. Required for the D405: that camera has
+        a single ``'Stereo Module'`` sensor that hosts BOTH ``stream.infrared``
+        AND ``stream.color`` profiles, so a name keyword check ("RGB" /
+        "Color") falsely returns False and the driver falls back to streaming
+        a monochrome IR frame as 3-channel — wildly off-distribution from the
+        color RGB feed used during training.
+        """
         rs = self._rs
         ctx = rs.context()
         for dev in ctx.query_devices():
             if self.device_id is None or dev.get_info(rs.camera_info.serial_number) == self.device_id:
-                sensor_names = [s.get_info(rs.camera_info.name) for s in dev.query_sensors()]
-                return any("RGB" in n or "Color" in n for n in sensor_names)
+                for sensor in dev.query_sensors():
+                    for sp in sensor.get_stream_profiles():
+                        try:
+                            if sp.stream_type() == rs.stream.color:
+                                return True
+                        except Exception:
+                            continue
+                return False
         # Device not (yet) enumerable — assume color and let pipeline.start() surface a real error.
         return True
 

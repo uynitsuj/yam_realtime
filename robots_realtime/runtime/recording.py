@@ -356,9 +356,22 @@ class AsyncMp4Writer(Writer):
     def write(self, topic: str, timestamp: float, data: dict) -> None:
         if not self._open:
             return
+        # Two supported payload shapes:
+        #   sim contract:    {"frame": ndarray}
+        #   CameraNode bus:  {"images": {sub: ndarray, ...}, ...}
         frame = data.get("frame")
-        if frame is None:
+        if frame is not None:
+            self._enqueue(topic, frame, timestamp)
             return
+        images = data.get("images")
+        if isinstance(images, dict) and images:
+            if len(images) == 1:
+                self._enqueue(topic, next(iter(images.values())), timestamp)
+            else:
+                for sub, sub_frame in images.items():
+                    self._enqueue(f"{topic}-{sub}", sub_frame, timestamp)
+
+    def _enqueue(self, topic: str, frame, timestamp: float) -> None:
         self._ensure_topic(topic)
         self._queues[topic].put((frame, timestamp))
 
