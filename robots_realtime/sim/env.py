@@ -15,7 +15,8 @@ from robots_realtime.sim.config import SimConfig, default_sim_config
 
 _MODELS_DIR = Path(__file__).parent / "models"
 _SCENE_XMLS = {
-    "bottles": _MODELS_DIR / "yam_bimanual_scene.xml",
+    "bottles":    _MODELS_DIR / "yam_bimanual_scene.xml",
+    "robot_only": _MODELS_DIR / "yam_bimanual_robot_only.xml",
 }
 _DEFAULT_SCENE = "bottles"
 

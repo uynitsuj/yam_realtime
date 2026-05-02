@@ -36,20 +36,32 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 
-def _read_mcap_json(path: Path) -> list[tuple[float, dict]]:
-    """Return [(ts_seconds, data_dict), ...] from a JSON-encoded MCAP file."""
+def _read_mcap_json(
+    path: Path, topic: str | None = None
+) -> list[tuple[float, dict]]:
+    """Return [(ts_seconds, data_dict), ...] from a JSON-encoded MCAP file.
+
+    If `topic` is given, only messages on that channel are returned.
+    """
     from mcap.reader import make_reader
 
     results: list[tuple[float, dict]] = []
     with open(path, "rb") as f:
-        for _, _, msg in make_reader(f).iter_messages():
+        for _, channel, msg in make_reader(f).iter_messages():
+            if topic is not None and channel.topic != topic:
+                continue
             ts = msg.log_time / 1e9  # nanoseconds → seconds
             results.append((ts, json.loads(msg.data)))
     return results
 
 
 def _load_episode(episode_dir: Path) -> dict:
-    """Load all streams from a robots_realtime sim episode directory.
+    """Load all streams from a robots_realtime episode directory.
+
+    Supports two recording formats:
+      sim teleop  — gello_{left,right}.mcap actions + yam-{cam}-images-rgb.mp4
+      real-robot  — openpi_policy.mcap actions + camera_{cam}-images-rgb.mp4
+                    plus yam_{left,right}.mcap robot joint_state streams.
 
     Returns:
         actions_left, ts_left   — (N, 7) float64, (N,) float64
@@ -60,12 +72,25 @@ def _load_episode(episode_dir: Path) -> dict:
     """
     print(f"Loading episode: {episode_dir}")
 
-    # --- Actions from gello MCAP files ---
-    def _load_arm(fname: str, label: str):
-        path = episode_dir / fname
-        if not path.exists():
-            raise FileNotFoundError(f"Missing {fname} in {episode_dir}")
-        msgs = _read_mcap_json(path)
+    # --- Actions: gello mcap (sim teleop) or openpi_policy mcap (real-robot) ---
+    def _load_arm(side: str):
+        gello_path  = episode_dir / f"gello_{side}.mcap"
+        policy_path = episode_dir / "openpi_policy.mcap"
+        if gello_path.exists():
+            label = f"gello_{side}"
+            msgs = _read_mcap_json(gello_path)
+        elif policy_path.exists():
+            label = f"openpi_policy/{side}_pos"
+            msgs = _read_mcap_json(policy_path, topic=f"/openpi_policy/{side}_pos")
+            if not msgs:
+                raise RuntimeError(
+                    f"openpi_policy.mcap has no /openpi_policy/{side}_pos messages"
+                )
+        else:
+            raise FileNotFoundError(
+                f"No action source for {side} arm in {episode_dir} "
+                f"(expected gello_{side}.mcap or openpi_policy.mcap)"
+            )
         arr = np.array([d["joint_pos"] for _, d in msgs], dtype=np.float64)
         ts  = np.array([t for t, _ in msgs], dtype=np.float64)
         dur = ts[-1] - ts[0] if len(ts) > 1 else 0.0
@@ -73,16 +98,21 @@ def _load_episode(episode_dir: Path) -> dict:
         print(f"  {label}: {len(arr)} frames, {dur:.1f}s at ~{hz:.0f} Hz  (shape {arr.shape})")
         return arr, ts
 
-    actions_left,  ts_left  = _load_arm("gello_left.mcap",  "gello_left")
-    actions_right, ts_right = _load_arm("gello_right.mcap", "gello_right")
+    actions_left,  ts_left  = _load_arm("left")
+    actions_right, ts_right = _load_arm("right")
 
-    # --- Camera videos ---
+    # --- Camera videos (sim uses 'yam-<cam>', real uses 'camera_<cam>') ---
     camera_frames: dict[str, np.ndarray] = {}
     camera_ts:     dict[str, np.ndarray] = {}
     for cam in ("left", "right", "top"):
-        mp4 = episode_dir / f"yam-{cam}-images-rgb.mp4"
-        npy = episode_dir / f"yam-{cam}-rgb-timestamp.npy"
-        if not mp4.exists():
+        mp4 = npy = None
+        for prefix in (f"yam-{cam}", f"camera_{cam}"):
+            cand_mp4 = episode_dir / f"{prefix}-images-rgb.mp4"
+            cand_npy = episode_dir / f"{prefix}-rgb-timestamp.npy"
+            if cand_mp4.exists():
+                mp4, npy = cand_mp4, cand_npy
+                break
+        if mp4 is None:
             continue
         try:
             import imageio.v3 as iio
@@ -91,9 +121,9 @@ def _load_episode(episode_dir: Path) -> dict:
             camera_frames[cam] = frames
             camera_ts[cam] = ts_arr
             h, w = frames.shape[1], frames.shape[2]
-            print(f"  camera '{cam}': {len(frames)} frames ({w}x{h}), {ts_arr[-1]-ts_arr[0]:.1f}s")
+            print(f"  camera '{cam}' ({mp4.name}): {len(frames)} frames ({w}x{h}), {ts_arr[-1]-ts_arr[0]:.1f}s")
         except Exception as exc:
-            print(f"  Warning: could not load camera '{cam}': {exc}")
+            print(f"  Warning: could not load camera '{cam}' from {mp4.name}: {exc}")
 
     return {
         "actions_left":  actions_left,
@@ -476,15 +506,19 @@ def main() -> None:
     parser.add_argument("--port",  type=int,   default=8080, help="Viser server port (default: 8080)")
     parser.add_argument("--speed", type=float, default=1.0,  help="Playback speed multiplier (default: 1.0)")
     parser.add_argument("--scene", type=str,   default=None, help="Scene name (default: from session_meta or 'hybrid')")
-    parser.add_argument("--task",  type=str,   default=None, help="Task name (default: from session_meta or 'bottles')")
+    parser.add_argument("--task",  type=str,   default=None, help="Task name (default: 'bottles' for sim recordings, 'robot_only' for real-robot)")
     args = parser.parse_args()
 
     episode_dir = Path(args.episode_dir).resolve()
 
     # Scene / task: prefer CLI args, then session_meta, then defaults.
+    # Real-robot recordings don't have yam-sim_state.mcap and don't need task
+    # objects in the scene — fall back to a robot-only scene (yams + station + walls).
     sim_cfg = _read_sim_config(episode_dir)
+    has_sim_state = (episode_dir / "yam-sim_state.mcap").exists()
+    default_task = "bottles" if has_sim_state else "robot_only"
     scene = args.scene or sim_cfg.get("scene", "hybrid")
-    task  = args.task  or sim_cfg.get("task",  "bottles")
+    task  = args.task  or sim_cfg.get("task",  default_task)
 
     # Load episode data
     data = _load_episode(episode_dir)
