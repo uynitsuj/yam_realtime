@@ -123,21 +123,15 @@ class GelloLeaderAgent(Agent):
         _orig_input = builtins.input
         builtins.input = lambda *_a, **_kw: ""
         try:
-            self.teleop.connect(calibrate=calibrate)
+            self.teleop.connect(
+                calibrate=calibrate,
+                drive_to_zero=drive_to_zero,
+                hold_gripper=hold_gripper,
+                dither=dither,
+            )
         finally:
             builtins.input = _orig_input
         logger.info("GelloLeaderAgent connected to %s (id=%s)", port, effective_id)
-
-        # ---- Active motor control at startup ---- #
-        if drive_to_zero:
-            self.teleop.drive_to_zero()
-            self.teleop.start_arm_hold()
-
-        if hold_gripper:
-            self.teleop.start_gripper_spring()
-
-        if dither:
-            self.teleop.start_arm_dither()
 
         self._profile = profile
         self._prof_accum: dict[str, list[float]] = defaultdict(list)
@@ -271,10 +265,6 @@ class GelloLeaderAgent(Agent):
         # --- Normal teleoperation ---
         action = self.teleop.get_action()
 
-        # Adaptive gripper spring — adjusts torque each frame
-        # self.teleop.update_gripper_spring(action["gripper.pos"])
-        # self.teleop.read_gripper_spring_state()
-
         # Extract the 6 arm joints (degrees)
         joint_deg = np.array([action[f"joint_{i}.pos"] for i in range(1, NUM_ARM_JOINTS + 1)])
 
@@ -284,7 +274,6 @@ class GelloLeaderAgent(Agent):
 
         if self.include_gripper:
             gripper = action["gripper.pos"]
-            # gripper = np.clip(1 - ((gripper - 5) / (85 - 5)), 0, 1)  # normalize gripper position to 0-1 range, w/ some deadzone
             pos = np.concatenate([joint_rad, [gripper]])
         else:
             pos = joint_rad

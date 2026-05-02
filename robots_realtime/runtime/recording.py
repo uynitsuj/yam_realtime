@@ -370,6 +370,11 @@ class AsyncMp4Writer(Writer):
             else:
                 for sub, sub_frame in images.items():
                     self._enqueue(f"{topic}-{sub}", sub_frame, timestamp)
+            return
+        # Fallback: bare ndarray keyed by topic name.
+        cand = data.get(topic)
+        if cand is not None and hasattr(cand, "ndim"):
+            self._enqueue(topic, cand, timestamp)
 
     def _enqueue(self, topic: str, frame, timestamp: float) -> None:
         self._ensure_topic(topic)

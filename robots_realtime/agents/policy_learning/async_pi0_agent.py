@@ -15,7 +15,7 @@ ramp blend at the chunk boundary. The blend length auto-scales with inference
 latency (more blending when the server took longer, since the old chunk is
 staler), clamped by ``[min_smoothed_actions, max_smoothed_actions]``.
 
-Four inference modes (``inference_mode`` kwarg):
+Five inference modes (``inference_mode`` kwarg):
 
     sync                — blocking, synchronous. Uses OpenPI's ``ActionChunkBroker``
                           so inference only fires when the last chunk is exhausted
@@ -32,6 +32,16 @@ Four inference modes (``inference_mode`` kwarg):
                           remaining and the new chunk's [d_actual:] tail
                           replaces it seamlessly. Matches LeRobot's
                           ActionQueue replace-on-merge semantics.
+    temporal_ensemble   — ACT-paper inference scheme (Zhao et al.) — synchronous
+                          and paper-faithful. One inference per consumer tick,
+                          blocking. At tick ``t`` every overlapping chunk
+                          contributes via ``w_i = exp(-k * age_index)`` weighted
+                          average; deque sorted oldest-first → ``age = 0`` at
+                          the head (highest weight). Default
+                          ``temporal_ensemble_k = 0.01`` matches the paper.
+                          Requires ``inference_time < 1/poll_freq`` to hold the
+                          consumer rate; otherwise the loop runs as fast as
+                          inference allows.
 
 ``inference_interval_s`` is an **orthogonal** rate cap: REQUIRED for
 ``async_rate_limited``, OPTIONAL for ``async`` and ``async_rtc`` (``None`` =
@@ -45,8 +55,9 @@ the agent is actually instantiated.
 
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Tuple
+from typing import Any, Deque, Dict, Literal, Tuple
 
 import numpy as np
 from dm_env.specs import Array
@@ -55,7 +66,7 @@ from robots_realtime.agents.agent import PolicyAgent
 from robots_realtime.agents.constants import ActionSpec
 from robots_realtime.robots.utils import Rate
 
-InferenceMode = Literal["sync", "async", "async_rate_limited", "async_rtc"]
+InferenceMode = Literal["sync", "async", "async_rate_limited", "async_rtc", "temporal_ensemble"]
 _ASYNC_MODES = ("async", "async_rate_limited", "async_rtc")
 
 ImagePreprocess = Literal["center_crop", "pad"]
@@ -196,6 +207,14 @@ class AsyncDiffusionAgent(PolicyAgent):
         # magnitude between the tail of the old chunk and the head of the new
         # one — catches "shoots forward" events where RTC pulled too hard.
         rtc_debug: bool = False,
+        # --- Temporal-ensemble (Zhao et al. ACT) ----------------------------- #
+        # Only used when ``inference_mode == "temporal_ensemble"``. Synchronous
+        # paper-faithful TE: one blocking inference per consumer tick, append
+        # chunk to a deque tagged with emit_tick, return the exp(-k * age_index)
+        # weighted average of every chunk that covers tick t. Replaces the
+        # linear-ramp blend used by the other async modes.
+        # Higher k = more weight on older predictions (smoother, laggier).
+        temporal_ensemble_k: float = 0.01,
         # MUST match the training-time image augmentation for your checkpoint.
         #   "center_crop": crop to a min(H,W)-sized square from the centre,
         #                  then resize. Discards peripheral FOV. Lab42 / PI
@@ -207,7 +226,7 @@ class AsyncDiffusionAgent(PolicyAgent):
     ) -> None:
         # Validate config first — user-error (bad mode) should surface before
         # env-error (missing openpi_client).
-        valid_modes = ("sync", "async", "async_rate_limited", "async_rtc")
+        valid_modes = ("sync", "async", "async_rate_limited", "async_rtc", "temporal_ensemble")
         if inference_mode not in valid_modes:
             raise ValueError(
                 f"inference_mode must be one of {valid_modes}; got {inference_mode!r}"
@@ -294,18 +313,36 @@ class AsyncDiffusionAgent(PolicyAgent):
         self._rtc_debug = bool(rtc_debug)
         self._rtc_last_tail: np.ndarray | None = None   # for client-side chunk-jump log
 
+        # Temporal-ensemble state. Deque of (emit_tick, chunk) sorted oldest-first;
+        # ``self._te_tick`` is the absolute consumer tick (advances per call to
+        # _step_temporal_ensemble). chunk[t - emit_tick] is the prediction for
+        # tick t. ``self._te_latest_*`` are kept solely for _snapshot_chunk in
+        # TE mode (where last_actions/action_counter aren't used).
+        self._te_k = float(temporal_ensemble_k)
+        self._te_chunks: Deque[Tuple[int, np.ndarray]] = deque()
+        self._te_tick: int = 0
+        self._te_latest_chunk: np.ndarray | None = None
+        self._te_latest_emit_tick: int = 0
+
+        # Mode wiring. Async modes spin a background inference thread; sync uses
+        # ActionChunkBroker; temporal_ensemble runs blocking inline (no thread,
+        # no broker — chunks merge into self._te_chunks per call).
         if inference_mode in _ASYNC_MODES:
             self.action_thread = threading.Thread(target=self._action_loop, name="AsyncDiffusionAgent_inference", daemon=True)
             self.action_thread.start()
             self._agent = None
-        else:
-            self._agent = _policy_agent.PolicyAgent(
-                policy=action_chunk_broker.ActionChunkBroker(
-                    policy=self._websocket_client_policy,
-                    action_horizon=self.action_horizon,
-                )
+            self._broker = None
+        elif inference_mode == "sync":
+            self._broker = action_chunk_broker.ActionChunkBroker(
+                policy=self._websocket_client_policy,
+                action_horizon=self.action_horizon,
             )
+            self._agent = _policy_agent.PolicyAgent(policy=self._broker)
             self.action_thread = None
+        else:  # temporal_ensemble
+            self.action_thread = None
+            self._agent = None
+            self._broker = None
 
     # ------------------------------------------------------------------ #
     # Metadata / specs
@@ -320,6 +357,7 @@ class AsyncDiffusionAgent(PolicyAgent):
             "max_smoothed_actions": self.max_smoothed_actions,
             "rtc_enabled": self._rtc_enabled,
             "rtc_execution_horizon": self._rtc_execution_horizon,
+            "temporal_ensemble_k": self._te_k,
             **self._websocket_client_policy.get_server_metadata(),
         }
 
@@ -444,11 +482,33 @@ class AsyncDiffusionAgent(PolicyAgent):
         Returns None if the buffer is not yet populated or is empty. The tail
         starts at `action_counter` so consumers can interpret step 0 of the
         returned array as "the next action we'd dequeue".
+
+        - async modes: slice ``last_actions[action_counter:]``.
+        - temporal_ensemble: slice the latest chunk from its current offset
+          forward, so the viz shows the freshest predicted plan.
+        - sync: read the broker's internal ``_last_results["actions"]``.
         """
-        with self.action_lock:
-            if self.last_actions is None:
+        if self.inference_mode == "temporal_ensemble":
+            with self.action_lock:
+                if self._te_latest_chunk is None:
+                    return None
+                offset = self._te_tick - self._te_latest_emit_tick
+                if offset < 0 or offset >= self._te_latest_chunk.shape[0]:
+                    return None
+                remaining = self._te_latest_chunk[offset:]
+        elif self.inference_mode == "sync":
+            if self._broker is None or self._broker._last_results is None:
                 return None
-            remaining = self.last_actions[self.action_counter:]
+            full = self._broker._last_results.get("actions")
+            if full is None or not isinstance(full, np.ndarray) or full.ndim != 2:
+                return None
+            cur = int(getattr(self._broker, "_cur_step", 0))
+            remaining = full[cur:]
+        else:
+            with self.action_lock:
+                if self.last_actions is None:
+                    return None
+                remaining = self.last_actions[self.action_counter:]
         if remaining.shape[0] == 0 or remaining.ndim != 2:
             return None
         # For use_joint_state_as_action=False, each row is (14,) = left7 + right7.
@@ -474,11 +534,59 @@ class AsyncDiffusionAgent(PolicyAgent):
             self._obs = model_input
         if self.inference_mode == "sync":
             return self._agent.get_action(self._obs)["actions"]
+        if self.inference_mode == "temporal_ensemble":
+            # Paper-faithful synchronous TE: blocking inference per consumer
+            # tick, then weighted ensemble over all overlapping chunks.
+            return self._step_temporal_ensemble(self._obs)
         # Async modes: if the background thread hasn't produced the first chunk
         # yet, tell the consumer we're not ready rather than blocking step().
         if self.last_actions is None:
             return None
         return self.select_action()
+
+    def _step_temporal_ensemble(self, obs: Dict[str, Any]) -> np.ndarray:
+        """Paper-faithful synchronous temporal ensembling (Zhao et al. ACT).
+
+        One blocking inference per consumer tick: every call fires a fresh
+        chunk, appends it to the deque (emit_tick = current consumer tick),
+        and returns the exponentially-weighted average of every chunk that
+        covers ``t``. Weights are ``exp(-k * age_index)`` with the deque
+        sorted oldest-first → ``age = 0`` at the head, which gets weight 1.
+
+        This blocks the AgentNode consumer for the duration of one inference
+        per tick. If ``inference_time > 1/poll_freq`` the consumer rate
+        degrades to whatever inference sustains; if it fits in budget, the
+        ensemble has exactly ``min(t+1, action_horizon)`` populated entries
+        at tick ``t`` (steady-state count = action_horizon).
+        """
+        chunk = np.asarray(self._websocket_client_policy.infer(obs)["actions"])
+        with self.action_lock:
+            t = self._te_tick
+            self._te_chunks.append((t, chunk))
+            # GC: drop any chunk whose [emit, emit + chunk_size) window has
+            # already passed. (Cheap because the deque is sorted oldest-first.)
+            while self._te_chunks and (
+                self._te_chunks[0][0] + self._te_chunks[0][1].shape[0] <= t
+            ):
+                self._te_chunks.popleft()
+            self._te_latest_chunk = chunk
+            self._te_latest_emit_tick = t
+
+            # Gather every contribution for tick t. We just appended chunk[0]
+            # for this tick so contribs is guaranteed non-empty; the loop
+            # exists to also fold in the prior overlapping chunks.
+            contribs: list[np.ndarray] = []
+            for emit_tick, c in self._te_chunks:
+                offset = t - emit_tick
+                if 0 <= offset < c.shape[0]:
+                    contribs.append(c[offset])
+            stacked = np.stack(contribs, axis=0)  # (N, action_dim)
+            ages = np.arange(stacked.shape[0], dtype=np.float32)
+            weights = np.exp(-self._te_k * ages)
+            weights = weights / weights.sum()
+            action = (stacked * weights[:, None]).sum(axis=0).astype(np.float32)
+            self._te_tick += 1
+        return action
 
     # ------------------------------------------------------------------ #
     # Async plumbing
@@ -715,3 +823,9 @@ class AsyncDiffusionAgent(PolicyAgent):
         with self.action_lock:
             self.last_actions = None
             self.action_counter = 0
+            self._te_chunks.clear()
+            self._te_tick = 0
+            self._te_latest_chunk = None
+            self._te_latest_emit_tick = 0
+        if self._broker is not None:
+            self._broker.reset()

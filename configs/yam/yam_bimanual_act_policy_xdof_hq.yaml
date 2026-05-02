@@ -1,0 +1,166 @@
+version: "1"
+
+# Bimanual YAM policy deployment via a remote ACT (Action Chunking Transformer)
+# inference server. The policy agent runs in a background thread that fires
+# websocket `infer` calls; AgentNode's consumer calls act() at poll_freq and
+# dequeues one action per tick from the chunk buffer. Smoothing across chunk
+# boundaries is handled inside the agent.
+#
+# Prereqs:
+#   - `openpi_client` installed in this venv.
+#   - ACT inference server reachable at the (ip, port) below. Start it from
+#     the act repo by pointing at any checkpoint in a run dir — the server
+#     auto-resolves the training config (via sibling metadata.json) and the
+#     normalization stats (via sibling norm_stats.json):
+#       uv run scripts/serve_policy.py \
+#         --path runs/<run>/checkpoint_<step>.pt
+#   - can_left / can_right interfaces up at 1 Mbit/s.
+#
+# (For local in-process ACT inference — no server required — use
+# robots_realtime.agents.policy_learning.async_act_agent:AsyncACTAgent
+# directly. That path is still supported but is heavier on this venv.)
+
+session:
+  save_root: recordings
+  # Policy-specific safety + ergonomics:
+  #   - start_paused: RobotNode commands are gated on startup so the arm doesn't
+  #     snap to wherever the policy thinks it should be. Hit [space] in the TUI
+  #     to hand off control.
+  #   - record_on_unpause: when the operator unpauses, automatically start an
+  #     episode so every rollout is captured from the instant of handoff.
+  start_paused: true
+  record_on_unpause: false
+
+nodes:
+  - type: AgentNode
+    name: act_policy
+    agent_class: robots_realtime.agents.policy_learning.async_remote_act_agent:AsyncRemoteACTAgent
+    agent_kwargs:
+      ip: 127.0.0.1
+      port: 8012
+      action_horizon: 30
+
+      # ── Inference ──────────────────────────────────────────────────────
+      #
+      # Knob                      sync     async    async_rate_limited  temporal_ensemble
+      # ─────────────────────────────────────────────────────────────────────────────────
+      # action_horizon            used     used     used                used
+      # inference_interval_s      ignored  opt cap  REQUIRED            ignored
+      # min/max_smoothed_actions  N/A*     used     used                N/A†
+      # temporal_ensemble_k       N/A      N/A      N/A                 used
+      #
+      #   * sync uses openpi-client's ActionChunkBroker which hard-swaps
+      #     chunks; no client-side blend is applied.
+      #   † temporal_ensemble is paper-faithful (Zhao et al. ACT): blocking
+      #     inference once per consumer tick, then exp(-k * age_index)
+      #     weighted average across every chunk that covers tick t. No
+      #     client-side blend; replaces the linear-ramp scheme entirely.
+      #     Requires inference_time < 1/poll_freq for the consumer rate to
+      #     hold; otherwise the loop just runs as fast as inference allows.
+      #
+      inference_mode: temporal_ensemble         # sync | async | async_rate_limited | temporal_ensemble
+      # inference_interval_s: 0.3
+      # min_smoothed_actions: 1
+      # max_smoothed_actions: 8
+      temporal_ensemble_k: 0.05               # ACT paper default; higher = more weight on older predictions (smoother, laggier)
+
+      # ── Image preprocessing (must match training augmentation) ─────────
+      # Image size is auto-resolved from the server's metadata
+      # (ACTPolicy.metadata["encoder_image_size"], matching the trained
+      # ModelConfig). To override (e.g. force a smaller payload over the
+      # wire than the model's native input size), uncomment:
+      # encoder_image_size: 224
+      image_preprocess: center_crop             # center_crop | resize
+
+      use_joint_state_as_action: false
+    state_topics:
+      left:  yam_left/joint_state
+      right: yam_right/joint_state
+    image_topics:
+      left_camera:  camera_left/rgb
+      right_camera: camera_right/rgb
+      top_camera:   camera_top/rgb
+    loop_mode: fixed_rate
+    poll_freq: 30
+
+  - type: RobotNode
+    name: yam_left
+    robot_config: robot_configs/yam/xdof_hq/left.yaml
+    cmd_topic: act_policy/left_pos
+    poll_freq: 200
+    ramp_duration_s: 1.5
+    # In-distribution starting pose for tshirt_folding_d405 — joints 1, 2
+    # need to be in roughly [0.5, 2.7] rad for the policy to see a state
+    # it actually trained on. The all-zeros pose puts the arm fully
+    # stretched out, which is OOD and produces erratic predictions.
+    startup_joint_pos: [-0.0235, 1.56242, 0.3495, 0.95763, -0.11537, -0.02913, 1.0]
+    # startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    startup_duration_s: 2.0
+
+  - type: RobotNode
+    name: yam_right
+    robot_config: robot_configs/yam/xdof_hq/right.yaml
+    cmd_topic: act_policy/right_pos
+    poll_freq: 200
+    ramp_duration_s: 1.5
+    startup_joint_pos: [0.01732, 1.54234, 0.33567, 0.98454, 0.11514, 0.03717, 1.0]
+    # startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    startup_duration_s: 2.0
+
+  - type: CameraNode
+    name: camera_top
+    driver: RealSenseCamera
+    device_id: "218622270376"
+    resolution: VGA
+    fps: 30
+
+  - type: CameraNode
+    name: camera_left
+    driver: RealSenseCamera
+    device_id: "218722271050"
+    resolution: VGA
+    fps: 30
+
+  - type: CameraNode
+    name: camera_right
+    driver: RealSenseCamera
+    device_id: "218622275506"
+    resolution: VGA
+    fps: 30
+
+  - type: ViserMonitorNode
+    name: viz
+    port: 8080
+    viz_freq: 20
+    auto_open_browser: true
+    fullscreen: true
+    up_axis: "+z"
+    initial_camera_position: [-0.7, -0.31, 0.3]
+    initial_camera_look_at:  [0.45, -0.31, 0.3]
+    chunk_topic: act_policy/chunk
+    n_chunk_frames: 10
+    chunk_frame_axes_length: 0.03
+    urdfs:
+      yam_left:
+        path: dependencies/i2rt/i2rt/robot_models/arm/yam/yam.urdf
+        state_topic: yam_left/joint_state
+        flip_joints: true
+        chunk_arm_key: left
+        gripper:
+          type: linear_4310
+          attach_link: link_6
+      yam_right:
+        path: dependencies/i2rt/i2rt/robot_models/arm/yam/yam.urdf
+        state_topic: yam_right/joint_state
+        flip_joints: true
+        chunk_arm_key: right
+        gripper:
+          type: linear_4310
+          attach_link: link_6
+        extrinsic:
+          position: [0.0, -0.61, 0.0]
+          rotation: [1.0, 0.0, 0.0, 0.0]
+    image_topics:
+      top:   camera_top/rgb
+      left:  camera_left/rgb
+      right: camera_right/rgb
