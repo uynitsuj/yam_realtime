@@ -51,26 +51,26 @@ nodes:
     startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     startup_duration_s: 2.0
 
-  # - type: CameraNode
-  #   name: camera_top
-  #   driver: RealSenseCamera
-  #   device_id: "218622270376"
-  #   resolution: VGA
-  #   fps: 30
+  - type: CameraNode
+    name: camera_top
+    driver: RealSenseCamera
+    device_id: "230322272858"
+    resolution: VGA
+    fps: 30
 
-  # - type: CameraNode
-  #   name: camera_left
-  #   driver: RealSenseCamera
-  #   device_id: "218722271050"
-  #   resolution: VGA
-  #   fps: 30
+  - type: CameraNode
+    name: camera_left
+    driver: RealSenseCamera
+    device_id: "218622270923"
+    resolution: VGA
+    fps: 30
 
-  # - type: CameraNode
-  #   name: camera_right
-  #   driver: RealSenseCamera
-  #   device_id: "218622275506"
-  #   resolution: VGA
-  #   fps: 30
+  - type: CameraNode
+    name: camera_right
+    driver: RealSenseCamera
+    device_id: "218622273065"
+    resolution: VGA
+    fps: 30
 
   # Live viser monitor — URDF overlays + camera panels, no commands.
   # Browsing is automatic on machines with a display (chromium --kiosk);
