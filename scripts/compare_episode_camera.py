@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
         default="xdof-internal-research/repromo/hlm_tshirt_reward_select_lerobot_sarm_8stage",
         help="S3 bucket/prefix (no s3:// prefix)",
     )
-    p.add_argument("--camera-id", type=int, default=0, help="OpenCV camera device index")
+    p.add_argument("--camera-serial", type=str, default=None, help="RealSense serial number (default: first device)")
     p.add_argument(
         "--camera-views",
         nargs="+",
@@ -268,6 +268,16 @@ def main() -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     print(f"Frame cache: {cache_dir}")
 
+    rs_cam = None
+    if not args.no_camera:
+        from robots_realtime.sensors.cameras.realsense_camera import RealSenseCamera
+
+        try:
+            rs_cam = RealSenseCamera(device_id=args.camera_serial)
+            print(f"RealSense camera opened: {rs_cam.get_camera_info()}")
+        except Exception as exc:
+            print(f"Warning: Cannot open RealSense camera: {exc}", file=sys.stderr)
+
     left_robot = None
     right_robot = None
     if not args.no_robot:
@@ -276,13 +286,6 @@ def main() -> None:
         print(f"Initializing right arm from {args.right_robot_config} ...")
         right_robot = instantiate_robot(args.right_robot_config)
         print("Robots ready")
-
-    cap = None
-    if not args.no_camera:
-        cap = cv2.VideoCapture(args.camera_id)
-        if not cap.isOpened():
-            print(f"Warning: Cannot open camera {args.camera_id}, running without camera", file=sys.stderr)
-            cap = None
 
     episode_idx = 0
     need_reload = True
@@ -307,13 +310,13 @@ def main() -> None:
 
         ep_panel = make_episode_panel(episode_frames, episode_idx, total_episodes)
 
-        if cap is not None:
-            ret, cam_frame = cap.read()
-            if ret:
+        if rs_cam is not None:
+            try:
+                cam_data = rs_cam.read()
+                cam_frame = cv2.cvtColor(cam_data.images["rgb"], cv2.COLOR_RGB2BGR)
                 cam_panel = make_camera_panel(cam_frame, ep_panel.shape[0] - 28)
-                # Add the 28px bar offset to camera panel is already handled in make_camera_panel
                 display = np.hstack([ep_panel, cam_panel])
-            else:
+            except Exception:
                 display = ep_panel
         else:
             display = ep_panel
@@ -355,8 +358,8 @@ def main() -> None:
         left_robot.close()
     if right_robot is not None and hasattr(right_robot, "close"):
         right_robot.close()
-    if cap is not None:
-        cap.release()
+    if rs_cam is not None:
+        rs_cam.stop()
     cv2.destroyAllWindows()
     print(f"\nCached frames at: {cache_dir}")
 

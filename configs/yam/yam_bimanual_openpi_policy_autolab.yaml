@@ -113,7 +113,7 @@ nodes:
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [-0.0235, 1.36242, 0.3495, 0.95763, -0.11537, -0.02913, 1.0]
-    startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    startup_joint_pos: [0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
   - type: RobotNode
@@ -123,7 +123,7 @@ nodes:
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [0.01732, 1.34234, 0.33567, 0.98454, 0.11514, 0.03717, 1.0]
-    startup_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    startup_joint_pos: [0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
   # Three Intel RealSense D405s — same station as the teleop config.
