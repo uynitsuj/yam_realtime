@@ -1,5 +1,14 @@
 version: "1"
 
+# ============================================================================
+# J4-KP + ZOOMED-FOV VARIANT of yam_bimanual_openpi_policy_xdof_hq_us05.yaml.
+# Two deltas from that config:
+#   - top camera publish_fov_crop 1.0 -> 0.88 (zoomed-in / ~12% tighter FOV)
+#   - follower RobotNodes -> xdof_hq/left_j4.yaml / right_j4.yaml
+#     (joint-4 kp 10 -> 40 only; all other kp and all kd baseline)
+# Baseline config is untouched.
+# ============================================================================
+#
 # Bimanual YAM policy deployment via an external OpenPI websocket inference server.
 # The policy agent runs inference on a background thread (inference_mode: async = flat-out);
 # AgentNode's consumer calls act() at poll_freq and dequeues one action per tick from the
@@ -114,7 +123,7 @@ nodes:
 
   - type: RobotNode
     name: yam_left
-    robot_config: robot_configs/yam/xdof_hq/left.yaml
+    robot_config: robot_configs/yam/xdof_hq/left_j4.yaml
     cmd_topic: openpi_policy/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
@@ -124,7 +133,7 @@ nodes:
 
   - type: RobotNode
     name: yam_right
-    robot_config: robot_configs/yam/xdof_hq/right.yaml
+    robot_config: robot_configs/yam/xdof_hq/right_j4.yaml
     cmd_topic: openpi_policy/right_pos
     poll_freq: 200
     ramp_duration_s: 1.5
@@ -157,7 +166,7 @@ nodes:
     fps: 30
     publish_resize: [224, 224]
     publish_resize_mode: center_crop
-    publish_fov_crop: 1.0
+    publish_fov_crop: 0.88
 
   - type: CameraNode
     name: camera_left

@@ -79,6 +79,12 @@ override-dependencies = [
     # pyroki depends on an unpinned jaxls git URL, which conflicts with our
     # pinned URL above; force the pinned revision across the whole graph.
     "jaxls @ git+https://github.com/brentyi/jaxls.git@5f766d3",
+    # lerobot pulls opencv-python-headless, which shares the cv2/ install dir
+    # with our GUI opencv-python and clobbers its .so (GUI: NONE), breaking
+    # cv2.imshow/namedWindow (e.g. scripts/compare_episode_camera.py). Drop the
+    # headless variant via an always-false marker; opencv-python is a superset
+    # that still satisfies lerobot's cv2 import.
+    "opencv-python-headless; python_version < '0'",
 ]
 
 [tool.setuptools.packages.find]

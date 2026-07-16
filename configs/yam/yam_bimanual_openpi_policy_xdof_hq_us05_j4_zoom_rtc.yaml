@@ -1,5 +1,23 @@
 version: "1"
 
+# ============================================================================
+# J4-KP + ZOOMED-FOV + RTC VARIANT of yam_bimanual_openpi_policy_xdof_hq_us05_j4_zoom.yaml.
+# Three deltas from the base us05 config:
+#   - top camera publish_fov_crop 1.0 -> 0.88 (zoomed-in / ~12% tighter FOV)
+#   - follower RobotNodes -> xdof_hq/left_j4.yaml / right_j4.yaml
+#     (joint-4 kp 10 -> 40 only; all other kp and all kd baseline)
+#   - inference_mode sync -> async_rtc (Real-Time Chunking): background
+#     precompute of the next chunk + server-side guidance so chunk boundaries
+#     stay coherent instead of hard-swapping. REQUIRES the openpi RTC fork
+#     (branch rorm-rabc has it). See docs/rtc.md.
+# Baseline config is untouched.
+#
+# NOTE on rtc_execution_horizon: jam sets 22, but that config runs
+# action_horizon 30. This deployment runs action_horizon 20 (us05 checkpoint),
+# so 22 would exceed the chunk length. Scaled to 15 (~same fraction as jam's
+# 22/30). Bump toward 20 for tighter prefix tracking, lower to free-form more.
+# ============================================================================
+#
 # Bimanual YAM policy deployment via an external OpenPI websocket inference server.
 # The policy agent runs inference on a background thread (inference_mode: async = flat-out);
 # AgentNode's consumer calls act() at poll_freq and dequeues one action per tick from the
@@ -71,20 +89,20 @@ nodes:
       ip: 127.0.0.1
       port: 8012
       action_horizon: 20
-      inference_mode: sync                 # sync | async | async_rate_limited | async_rtc | temporal_ensemble
+      inference_mode: async_rtc            # sync | async | async_rate_limited | async_rtc | temporal_ensemble
       # inference_interval_s: 0.7                 # rate cap in seconds (None = flat-out async)
       # min_smoothed_actions: 1                 # only meaningful for async / async_rate_limited
       # max_smoothed_actions: 10                # (ignored in sync and effectively unused in async_rtc)
       # temporal_ensemble_k: 0.05               # ACT paper default; higher = more weight on older predictions (smoother, laggier)
-      # rtc_execution_horizon: 22               # async_rtc only; None → server's action_horizon
-      # rtc_consumer_rate_hz: 30                  # async_rtc only; converts latency → inference_delay ticks
+      rtc_execution_horizon: 15               # async_rtc only; None → server's action_horizon. Scaled from jam's 22 (horizon 30) to fit action_horizon 20 here.
+      rtc_consumer_rate_hz: 30                  # async_rtc only; converts latency → inference_delay ticks
       # Upper clamp on RTC guidance weight (server side). With the prefix now
       # normalized into model-space by Policy._rtc_action_normalizer, a
       # moderate value (1–2) should keep the guided v_t on the same side as
       # the base v_t while still tracking the prefix. If the arm is still
       # jerky, drop to 0.5. If the [rtc] log shows |corr| << |v_t| and
       # chunk-boundary jitter persists, raise to 3–5.
-      # rtc_max_guidance_weight: 4.0
+      rtc_max_guidance_weight: 4.0
       # rtc_debug controls the CLIENT-side chunk-jump log. Server-side per-
       # denoising-step stats are controlled independently by the RTC_DEBUG
       # env var on the server process (those prints add real latency via
@@ -114,7 +132,7 @@ nodes:
 
   - type: RobotNode
     name: yam_left
-    robot_config: robot_configs/yam/xdof_hq/left.yaml
+    robot_config: robot_configs/yam/xdof_hq/left_j4.yaml
     cmd_topic: openpi_policy/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
@@ -124,7 +142,7 @@ nodes:
 
   - type: RobotNode
     name: yam_right
-    robot_config: robot_configs/yam/xdof_hq/right.yaml
+    robot_config: robot_configs/yam/xdof_hq/right_j4.yaml
     cmd_topic: openpi_policy/right_pos
     poll_freq: 200
     ramp_duration_s: 1.5
@@ -157,7 +175,7 @@ nodes:
     fps: 30
     publish_resize: [224, 224]
     publish_resize_mode: center_crop
-    publish_fov_crop: 1.0
+    publish_fov_crop: 0.88
 
   - type: CameraNode
     name: camera_left

@@ -1,5 +1,12 @@
 version: "1"
 
+# ============================================================================
+# STIFF-GAINS VARIANT of yam_bimanual_openpi_policy_xdof_hq_us05.yaml.
+# Identical to that config except the follower RobotNodes point at
+# xdof_hq/left_stiff.yaml / right_stiff.yaml (arm-joint kp +50%, kd bumped).
+# Use this to A/B stiffer follower tracking; the baseline config is untouched.
+# ============================================================================
+#
 # Bimanual YAM policy deployment via an external OpenPI websocket inference server.
 # The policy agent runs inference on a background thread (inference_mode: async = flat-out);
 # AgentNode's consumer calls act() at poll_freq and dequeues one action per tick from the
@@ -114,7 +121,7 @@ nodes:
 
   - type: RobotNode
     name: yam_left
-    robot_config: robot_configs/yam/xdof_hq/left.yaml
+    robot_config: robot_configs/yam/xdof_hq/left_stiff.yaml
     cmd_topic: openpi_policy/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
@@ -124,7 +131,7 @@ nodes:
 
   - type: RobotNode
     name: yam_right
-    robot_config: robot_configs/yam/xdof_hq/right.yaml
+    robot_config: robot_configs/yam/xdof_hq/right_stiff.yaml
     cmd_topic: openpi_policy/right_pos
     poll_freq: 200
     ramp_duration_s: 1.5
