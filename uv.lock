@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.11.*"
 resolution-markers = [
     "sys_platform == 'linux'",
@@ -16,6 +16,7 @@ overrides = [
     { name = "numpy", specifier = "==1.26.4" },
     { name = "tyro", specifier = ">=1.0.1" },
 ]
+build-constraints = [{ name = "scikit-build-core", specifier = "<0.10" }]
 
 [[package]]
 name = "absl-py"
