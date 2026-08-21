@@ -24,12 +24,27 @@ Session YAML example::
         left: franka/joint_state
       image_topics:
         camera_top: camera_top/rgb
+
+Bimanual agents omit ``arm_key``; the action dict's per-arm keys then fan out
+to ``{name}/{key}_pos`` (e.g. ``yam_viser/left_pos``, ``yam_viser/right_pos``),
+matching AgentNode's convention::
+
+    - type: ViserTeleopNode
+      name: yam_viser
+      agent_class: robots_realtime.agents.teleoperation.yam_pyroki_viser_agent:YamPyrokiViserAgent
+      agent_kwargs:
+        bimanual: true
+        right_arm_extrinsic: {position: [0.0, -0.61, 0.0], rotation: [1.0, 0.0, 0.0, 0.0]}
+      state_topics:
+        left:  yam_left/joint_state
+        right: yam_right/joint_state
 """
 
 from __future__ import annotations
 
 import importlib
 import time
+from typing import Any
 
 import numpy as np
 
@@ -80,6 +95,11 @@ class ViserTeleopNode(Node):
             list(self._state_topics.values()) + list(self._image_topics.values())
         )
         self.poll_freq = ik_freq
+        # Advertise the topics this node will actually publish: a single-arm
+        # agent (or one pinned with arm_key) emits joint_pos; a multi-arm agent
+        # fans out to {arm}_pos, one per state topic.
+        if arm_key is None and len(self._state_topics) > 1:
+            self.published_topics = [f"{key}_pos" for key in self._state_topics]
         super().__init__(name=name, writer=writer, **kwargs)
 
         self._agent = None
@@ -88,6 +108,7 @@ class ViserTeleopNode(Node):
         self._arm_key = arm_key
         self._viz_period = 1.0 / viz_freq
         self._last_viz_update: float = 0.0
+        self._last_action: dict[str, np.ndarray] = {}
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -126,12 +147,28 @@ class ViserTeleopNode(Node):
             self._last_viz_update = ts
 
         # agent.act() sets agent.obs (drives visualization) and returns IK targets.
+        _t_act = time.perf_counter()
         action = self._agent.act(state_obs)
+        self._perf.record("act_ms", (time.perf_counter() - _t_act) * 1e3)
 
-        # Publish joint commands.
-        pos = self._extract_pos(action)
-        if pos is not None:
-            self.publish("joint_pos", {"joint_pos": pos}, ts=ts)
+        # How far the IK output moves per tick, per arm. Compare against the
+        # same metric on the RobotNode side (cmd_step_mrad): if the agent's
+        # steps are smooth but the robot's are chunky, commands are being
+        # dropped or coalesced in transit rather than generated stepped.
+        if isinstance(action, dict):
+            for key, arm in action.items():
+                if key.startswith("_"):
+                    continue
+                pos = self._as_pos(arm)
+                if pos is None:
+                    continue
+                prev = self._last_action.get(key)
+                if prev is not None and prev.shape == pos.shape:
+                    self._perf.record(f"ik_step_mrad[{key}]", float(np.abs(pos - prev).max()) * 1e3)
+                self._last_action[key] = pos
+
+        # Publish joint commands (single-arm → joint_pos, multi-arm → {key}_pos).
+        self._publish_commands(action, ts)
 
     def cleanup(self) -> None:
         if self._agent is not None and hasattr(self._agent, "close"):
@@ -139,20 +176,50 @@ class ViserTeleopNode(Node):
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
-    def _extract_pos(self, action: dict) -> np.ndarray | None:
+    def _publish_commands(self, action: dict, ts: float) -> None:
+        """Publish joint targets, mirroring AgentNode's topic convention.
+
+        ``arm_key`` set              → action[arm_key]["pos"] as ``joint_pos``
+        flat ``{"pos": ...}``        → ``joint_pos``
+        one arm key                  → ``joint_pos``
+        several arm keys (bimanual)  → ``{key}_pos`` for each
+        """
+        if not isinstance(action, dict) or not action:
+            return
+
         if self._arm_key is not None:
-            arm = action.get(self._arm_key)
-            if arm is None:
-                return None
-            return np.asarray(arm["pos"] if isinstance(arm, dict) else arm, dtype=np.float32)
+            pos = self._as_pos(action.get(self._arm_key))
+            if pos is not None:
+                self.publish("joint_pos", {"joint_pos": pos}, ts=ts)
+            return
+
         if "pos" in action:
-            return np.asarray(action["pos"], dtype=np.float32)
-        non_private = [k for k in action if not k.startswith("_")]
-        if len(non_private) == 1:
-            arm = action[non_private[0]]
-            if isinstance(arm, dict) and "pos" in arm:
-                return np.asarray(arm["pos"], dtype=np.float32)
-        return None
+            pos = self._as_pos(action)
+            if pos is not None:
+                self.publish("joint_pos", {"joint_pos": pos}, ts=ts)
+            return
+
+        arm_keys = [k for k in action if not k.startswith("_")]
+        if len(arm_keys) == 1:
+            pos = self._as_pos(action[arm_keys[0]])
+            if pos is not None:
+                self.publish("joint_pos", {"joint_pos": pos}, ts=ts)
+            return
+
+        for key in arm_keys:
+            pos = self._as_pos(action[key])
+            if pos is not None:
+                self.publish(f"{key}_pos", {"joint_pos": pos}, ts=ts)
+
+    @staticmethod
+    def _as_pos(arm: Any) -> np.ndarray | None:
+        if arm is None:
+            return None
+        if isinstance(arm, dict):
+            if "pos" not in arm:
+                return None
+            arm = arm["pos"]
+        return np.asarray(arm, dtype=np.float32)
 
     @classmethod
     def build_kwargs(cls, params: dict) -> dict:

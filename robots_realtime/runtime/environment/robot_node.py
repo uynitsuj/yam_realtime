@@ -11,12 +11,29 @@ Published topics:
 
 Subscribed topics (configured at construction):
     ``{cmd_topic}``         — e.g. "gello_left/joint_pos"
+
+Command tracing (``debug_trace``)
+---------------------------------
+Set ``debug_trace: true`` on the node (or ``RR_TRACE=1`` in the environment to
+turn it on for every RobotNode) to append one CSV row per poll tick with the
+commanded and the achieved joint positions side by side. This is the highest
+rate at which those two are observable: the node's ``poll_freq``, capped by the
+i2rt motor-chain loop at 250 Hz (4 ms) which is what actually refreshes state
+and pushes commands onto CAN. Sampling faster than that just re-logs the same
+cached values.
+
+Each row carries the raw target from the bus, the *applied* target (after the
+handoff ramp — this is what reached ``command_joint_pos``), the measured
+position/velocity/effort, and the age + freshness of the command message, so a
+stepped command stream can be told apart from a laggy follower.
 """
 
 from __future__ import annotations
 
 import importlib
+import os
 import time
+from pathlib import Path
 
 import numpy as np
 import yaml as _yaml
@@ -84,6 +101,7 @@ class RobotNode(Node):
         shutdown_duration_s: float = 2.0,
         ramp_duration_s: float = 1.5,
         resume_gap_s: float = 0.2,
+        debug_trace: bool | str | None = None,
         writer=None,
         **kwargs,
     ) -> None:
@@ -114,6 +132,92 @@ class RobotNode(Node):
         self._ramping: bool = False
         self._last_msg_ts: float = 0.0
 
+        # ── Command/state trace ───────────────────────────────────────────────
+        # debug_trace: True / a path / None. RR_TRACE=1 forces it on everywhere.
+        if debug_trace is None and os.environ.get("RR_TRACE", "0") != "0":
+            debug_trace = True
+        self._trace_path: Path | None = None
+        if debug_trace:
+            if isinstance(debug_trace, str):
+                self._trace_path = Path(debug_trace)
+            else:
+                root = Path(os.environ.get("RR_TRACE_DIR", "debug_traces"))
+                self._trace_path = root / f"{name}_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+        self._trace_file = None
+        self._trace_rows: list[str] = []
+        self._trace_last_flush: float = 0.0
+        self._last_applied: np.ndarray | None = None
+
+    # ── Command/state trace helpers ───────────────────────────────────────────
+
+    def _trace_open(self) -> None:
+        if self._trace_path is None:
+            return
+        self._trace_path.parent.mkdir(parents=True, exist_ok=True)
+        self._trace_file = open(self._trace_path, "w", buffering=1024 * 1024)
+        n_cmd = 7
+        n_arm = 6
+        cols = ["t", "cmd_ts", "cmd_age_ms", "cmd_fresh", "ramping"]
+        cols += [f"target_{i}" for i in range(n_cmd)]
+        cols += [f"applied_{i}" for i in range(n_cmd)]
+        cols += [f"meas_{i}" for i in range(n_arm)] + ["meas_gripper"]
+        cols += [f"vel_{i}" for i in range(n_arm)]
+        cols += [f"eff_{i}" for i in range(n_arm)]
+        self._trace_file.write(",".join(cols) + "\n")
+        print(f"[{self.name}] command trace -> {self._trace_path}")
+
+    def _trace_row(
+        self,
+        ts: float,
+        cmd_ts: float | None,
+        fresh: bool,
+        target: np.ndarray | None,
+        applied: np.ndarray | None,
+        obs: dict,
+    ) -> None:
+        """Append one row. Formatting is deferred string work — no I/O here."""
+        if self._trace_file is None:
+            return
+
+        def _fmt(arr: object, n: int) -> list[str]:
+            if arr is None:
+                return [""] * n
+            flat = np.asarray(arr, dtype=np.float64).ravel()
+            out = [f"{v:.6f}" for v in flat[:n]]
+            return out + [""] * (n - len(out))
+
+        age = "" if cmd_ts is None else f"{(ts - cmd_ts) * 1e3:.3f}"
+        parts = [
+            f"{ts:.6f}",
+            "" if cmd_ts is None else f"{cmd_ts:.6f}",
+            age,
+            "1" if fresh else "0",
+            "1" if self._ramping else "0",
+        ]
+        parts += _fmt(target, 7)
+        parts += _fmt(applied, 7)
+        parts += _fmt(obs.get("joint_pos"), 6)
+        parts += _fmt(obs.get("gripper_pos"), 1)
+        parts += _fmt(obs.get("joint_vel"), 6)
+        parts += _fmt(obs.get("joint_eff"), 6)
+        self._trace_rows.append(",".join(parts))
+
+        # Flush off the hot path, at most twice a second.
+        if ts - self._trace_last_flush >= 0.5:
+            self._trace_file.write("\n".join(self._trace_rows) + "\n")
+            self._trace_rows.clear()
+            self._trace_last_flush = ts
+
+    def _trace_close(self) -> None:
+        if self._trace_file is None:
+            return
+        if self._trace_rows:
+            self._trace_file.write("\n".join(self._trace_rows) + "\n")
+            self._trace_rows.clear()
+        self._trace_file.close()
+        self._trace_file = None
+        print(f"[{self.name}] command trace written: {self._trace_path}")
+
     def setup(self) -> None:
         if self._robot is None:
             if self._robot_config is None:
@@ -128,6 +232,8 @@ class RobotNode(Node):
             self._move_to_pose(self._startup_joint_pos, self._startup_duration_s)
             print(f"[{self.name}] Startup pose reached")
 
+        self._trace_open()
+
     def step(self) -> None:
         ts = time.time()
         now = time.monotonic()
@@ -138,6 +244,11 @@ class RobotNode(Node):
         if self._paused:
             self.publish("joint_state", self._robot.get_observations(), ts=ts)
             return
+
+        target: np.ndarray | None = None
+        applied: np.ndarray | None = None
+        cmd_ts: float | None = None
+        is_new = False
 
         if self._cmd_topic:
             cmd = self.get_latest(self._cmd_topic)
@@ -169,22 +280,45 @@ class RobotNode(Node):
                     self._last_msg_ts = cmd_ts
 
                 _t_cmd = time.perf_counter()
+                applied = target
                 if self._ramping and self._ramp_seed is not None:
                     alpha = (now - self._ramp_start_time) / self._ramp_duration_s
                     if alpha >= 1.0:
                         self._ramping = False
-                        self._robot.command_joint_pos(target)
                     else:
                         alpha = max(0.0, alpha)
-                        blended = (1.0 - alpha) * self._ramp_seed + alpha * target
-                        self._robot.command_joint_pos(blended)
-                else:
-                    self._robot.command_joint_pos(target)
+                        applied = (1.0 - alpha) * self._ramp_seed + alpha * target
+                self._robot.command_joint_pos(applied)
                 self._perf.record("robot_cmd_ms", (time.perf_counter() - _t_cmd) * 1e3)
+
+                # Steppiness metrics. "cmd_fresh" is only recorded when a new
+                # message actually arrived, so PerfStats' n/s for it is the
+                # *effective* command rate reaching the arm — which is the
+                # number to compare against the poll rate when motion looks
+                # stepped. cmd_step_mrad is how far each fresh command jumps.
+                if is_new:
+                    self._perf.record("cmd_fresh_ms", (ts - cmd_ts) * 1e3 if cmd_ts else 0.0)
+                    if self._last_applied is not None:
+                        self._perf.record(
+                            "cmd_step_mrad",
+                            float(np.abs(applied - self._last_applied).max()) * 1e3,
+                        )
+                    self._last_applied = applied.copy()
 
         _t_obs = time.perf_counter()
         obs = self._robot.get_observations()
         self._perf.record("robot_obs_ms", (time.perf_counter() - _t_obs) * 1e3)
+
+        if applied is not None:
+            meas = obs.get("joint_pos")
+            if meas is not None:
+                n = min(len(meas), len(applied))
+                self._perf.record(
+                    "track_err_mrad",
+                    float(np.abs(np.asarray(meas[:n]) - applied[:n]).max()) * 1e3,
+                )
+
+        self._trace_row(ts, cmd_ts, is_new, target, applied, obs)
         self.publish("joint_state", obs, ts=ts)
 
     def cleanup(self) -> None:
@@ -198,6 +332,8 @@ class RobotNode(Node):
 
         if hasattr(self._robot, "stop"):
             self._robot.stop()
+
+        self._trace_close()
 
     def _move_to_pose(self, target: list[float], duration_s: float) -> None:
         """Smoothly interpolate robot to target joint position."""
@@ -229,6 +365,7 @@ class RobotNode(Node):
             "shutdown_duration_s",
             "ramp_duration_s",
             "resume_gap_s",
+            "debug_trace",
         ):
             if key in params:
                 kwargs[key] = params[key]

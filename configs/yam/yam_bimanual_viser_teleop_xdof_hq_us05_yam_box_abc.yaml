@@ -1,0 +1,151 @@
+version: "1"
+
+# Bimanual YAM teleop driven by draggable end-effector gizmos in Viser.
+# Adapted from yam_bimanual_passive_gello_teleop_xdof_hq_us05.yaml for the
+# hardware actually attached to this machine (surveyed 2026-08-20):
+#
+#   CAN — two CANable 2.5 adapters, one per follower arm. No GELLO leader
+#   adapters are present, which is why this config drives the arms from Viser
+#   IK instead of passive leaders.
+#     207B34A158455017  ->  right follower   (enumerates as can0 today)
+#     208237984546500A  ->  left  follower   (enumerates as can1 today)
+#   Kernel names are enumeration-order dependent, so bring the buses up with
+#     ./scripts/setup_can_yam_bimanual_us05.sh
+#   which renames them to can_left / can_right by USB serial and sets 1 Mbit/s.
+#   (Those are the names robot_configs/yam/xdof_hq/{left,right}.yaml expect. To
+#   skip the rename, edit `channel:` in those two files to can1 / can0.)
+#
+#   Cameras — three Intel RealSense D405s (serials from `rs-enumerate-devices -s`;
+#   roles identified by grabbing a frame from each):
+#     427622273855  top   (overhead, sees both arms + the workspace)
+#     427622271411  left  (left  arm wrist)
+#     427622273554  right (right arm wrist)
+#
+# Teleop usage:
+#   1. ./scripts/setup_can_yam_bimanual_us05.sh
+#   2. uv run python -m robots_realtime.main configs/yam/yam_bimanual_viser_teleop_xdof_hq_us05.yaml
+#   3. Open http://localhost:8080 — one gizmo per arm, dragged in that arm's
+#      base frame. The solid arm is the IK solution, the translucent red arm is
+#      the measured state, and the sliders are normalized gripper commands
+#      (0 = closed, 1 = open).
+#   4. The agent snaps both gizmos onto the measured arm poses before the first
+#      command, so handover is jump-free. "Sync gizmos to robot" re-snaps at any
+#      time. With start_paused: true, unpause with [space] in the TUI.
+#
+# Perf debugging ("why does the motion look stepped?")
+#   RR_TRACE=1 uv run python -m robots_realtime.main configs/yam/yam_bimanual_viser_teleop_xdof_hq_us05.yaml
+#   uv run python scripts/analyze_cmd_trace.py debug_traces/yam_left_*.csv
+#
+#   RR_TRACE=1 makes every RobotNode append one CSV row per poll tick with the
+#   commanded and achieved joint positions side by side (equivalently, set
+#   `debug_trace: true` on a single RobotNode below). 200 Hz here; the ceiling
+#   is the i2rt motor-chain loop at 250 Hz (4 ms) — it is what actually pushes
+#   commands onto CAN and refreshes state, so sampling faster only re-logs
+#   cached values. Raise poll_freq to 250 to match it exactly.
+#
+#   The rolling perf lines (RR_PERF_INTERVAL=2 by default, in the TUI log pane
+#   and /tmp/rr_logs_*/{node}.log) carry the same story live:
+#     yam_viser: act_ms, ik_step_mrad[left|right]  — how much the IK output
+#                moves per tick, i.e. how smooth the agent's output is
+#     yam_left:  cmd_fresh_ms (its n/s is the *effective* command rate reaching
+#                the arm), cmd_step_mrad, track_err_mrad, loop_ms/step_ms
+#   A cmd_fresh rate far below poll_freq means each setpoint is held for several
+#   ticks — that staircase is what reads as "steppy". Note the analyzer's
+#   "distinct setpoints" line: identical repeated messages count as a held
+#   setpoint even when the message rate looks healthy.
+
+session:
+  save_root: recordings
+  # Commands are gated until the operator unpauses, so the arms don't chase the
+  # gizmos while the browser is still loading / being positioned.
+  start_paused: false
+
+nodes:
+  - type: ViserTeleopNode
+    name: yam_viser
+    agent_class: robots_realtime.agents.teleoperation.yam_pyroki_viser_agent:YamPyrokiViserAgent
+    agent_kwargs:
+      bimanual: true
+      # Right base pose relative to the left base — same extrinsic the viser
+      # monitor overlays use at this station.
+      right_arm_extrinsic:
+        position: [0.0, -0.61, 0.0]
+        rotation: [1.0, 0.0, 0.0, 0.0]   # wxyz identity
+      ik_rate: 200.0                     # matches the RobotNode poll rate below
+      viser_port: 8080
+      gripper_initial: 1.0               # normalized: 1 = open
+      sync_on_start: true
+      # Command smoothing. Viser delivers gizmo drags at the browser's event
+      # rate (~20 Hz measured here), so the raw IK output is a staircase: on a
+      # 14 s trace only 47 of 1423 published commands differed from the one
+      # before, and those jumped 83 mrad (p50) to 455 mrad (max) in a single
+      # tick — the arm lunges, waits, lunges. The slew limiter turns that into
+      # one bounded increment per tick (max_joint_speed x dt = 10 mrad here).
+      # Both are live sliders in the GUI; raise the speed if teleop feels
+      # sluggish during fast drags, lower it if the arm still snaps.
+      max_joint_speed: 2.0               # rad/s; 0 disables the limiter
+      max_gripper_speed: 4.0             # normalized units/s
+      smoothing_tau_s: 0.03              # first-order filter on the target; 0 = off
+    # No arm_key: the bimanual action dict fans out to
+    # yam_viser/left_pos and yam_viser/right_pos.
+    ik_freq: 200.0                     # 1 fresh command per RobotNode tick
+    viz_freq: 20.0
+    state_topics:
+      left:  yam_left/joint_state        # drives the ghost overlay + gizmo sync
+      right: yam_right/joint_state
+    image_topics:
+      top:   camera_top/rgb
+      left:  camera_left/rgb
+      right: camera_right/rgb
+
+  - type: RobotNode
+    name: yam_left
+    robot_config: robot_configs/yam/xdof_hq/left.yaml
+    cmd_topic: yam_viser/left_pos
+    poll_freq: 200          # ceiling is 250 Hz = the i2rt motor-chain loop
+    ramp_duration_s: 1.5
+    # debug_trace: true     # or run with RR_TRACE=1 to trace every RobotNode
+    startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
+    startup_duration_s: 2.0
+
+  - type: RobotNode
+    name: yam_right
+    robot_config: robot_configs/yam/xdof_hq/right.yaml
+    cmd_topic: yam_viser/right_pos
+    poll_freq: 200          # ceiling is 250 Hz = the i2rt motor-chain loop
+    ramp_duration_s: 1.5
+    # debug_trace: true
+    startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
+    startup_duration_s: 2.0
+
+  # publish_resize keeps the bus payload at the policy input size; the on-disk
+  # recording stays full VGA. Swap device_id values if a camera gets re-mounted.
+  - type: CameraNode
+    name: camera_top
+    driver: RealSenseCamera
+    device_id: "427622273855"
+    resolution: VGA
+    fps: 30
+    publish_resize: [224, 224]
+    publish_resize_mode: center_crop
+    publish_fov_crop: 0.92
+
+  - type: CameraNode
+    name: camera_left
+    driver: RealSenseCamera
+    device_id: "427622271411"
+    resolution: VGA
+    fps: 30
+    publish_resize: [224, 224]
+    publish_resize_mode: center_crop
+    publish_fov_crop: 1.0
+
+  - type: CameraNode
+    name: camera_right
+    driver: RealSenseCamera
+    device_id: "427622273554"
+    resolution: VGA
+    fps: 30
+    publish_resize: [224, 224]
+    publish_resize_mode: center_crop
+    publish_fov_crop: 1.0
