@@ -1,15 +1,25 @@
 """Live web viewer for every camera attached to this machine.
 
-Discovers all connected RealSense devices (via ``pyrealsense2``) and all
-plain UVC / V4L2 webcams (via ``/sys/class/video4linux``), then serves a
-single page that shows every stream at once and lets you tick the ones you
-want to compare side by side.
+Discovers all connected RealSense devices (via ``pyrealsense2``), Stereolabs
+ZED cameras (via ``pyzed``: USB ZEDs on this machine plus ZED SDK network
+streams, e.g. a ZED X streamed from a Jetson) and all plain UVC / V4L2 webcams
+(via ``/sys/class/video4linux``), then serves a single page that shows every
+stream at once and lets you tick the ones you want to compare side by side.
 
 Run it::
 
     uv run scripts/camera_web_viewer.py                       # http://0.0.0.0:8080
     uv run scripts/camera_web_viewer.py --port 9000 --fps 15
     uv run scripts/camera_web_viewer.py --names-from configs/yam/<session>.yaml
+    uv run scripts/camera_web_viewer.py --zed-stream 10.0.128.50:30000 --zed-resolution HD1080
+
+ZED tiles show the rectified LEFT eye through ``ZedCamera`` (``image_key="rgb"``),
+i.e. the same frame a session's CameraNode publishes, so they are directly
+comparable with what a policy sees. ``--resolution`` is WxH for RealSense/UVC;
+ZEDs only support fixed presets, so it is mapped to the smallest USB-safe preset
+that covers the requested size (override with ``--zed-resolution``). If the ZED
+SDK is unavailable (missing, or ``/usr/local/zed`` not readable), ZEDs fall back
+to raw UVC tiles (unrectified side-by-side stereo frame) with a hint in the log.
 
 Cameras are opened lazily: a device is only claimed while at least one browser
 tile is showing it, and it is released ``--idle-timeout`` seconds after the last
@@ -157,28 +167,114 @@ class UvcCamera(CameraDriver):
 # --------------------------------------------------------------------------- #
 
 
+STEREOLABS_USB_VENDOR = "2b03"
+ZED_SDK_DIR = Path("/usr/local/zed")
+# USB ZED (ZED / Mini / 2 / 2i) presets, smallest first. SVGA/HD1200 are GMSL-only
+# (ZED X) and would fail to open on a USB unit, so they are never auto-selected.
+ZED_USB_PRESETS: tuple[tuple[str, int, int], ...] = (
+    ("VGA", 672, 376),
+    ("HD720", 1280, 720),
+    ("HD1080", 1920, 1080),
+    ("HD2K", 2208, 1242),
+)
+
+
+def zed_resolution_for(resolution: tuple[int, int]) -> str:
+    """Smallest USB-safe ZED preset that covers the requested WxH (``--resolution`` is WxH)."""
+    width, height = resolution
+    for preset, w, h in ZED_USB_PRESETS:
+        if w >= width and h >= height:
+            return preset
+    return ZED_USB_PRESETS[-1][0]
+
+
 @dataclass
 class DeviceSpec:
     """A camera we know how to open, before it has actually been opened."""
 
     id: str
     label: str
-    kind: str  # "realsense" | "uvc"
-    detail: str  # serial number or /dev path
+    kind: str  # "realsense" | "uvc" | "zed" | "zed-stream"
+    detail: str  # serial number, /dev path, or host:port
     extra: dict[str, str] = field(default_factory=dict)
+    # ZED preset override ("HD720", ...). None = derive from the requested WxH.
+    zed_resolution: Optional[str] = None
 
     def build(self, resolution: tuple[int, int], fps: int) -> CameraDriver:
         if self.kind == "realsense":
             return RealSenseCamera(device_id=self.detail, resolution=resolution, fps=fps)
+        if self.kind in ("zed", "zed-stream"):
+            return self._build_zed(resolution, fps)
         return UvcCamera(device_path=self.detail, resolution=resolution, fps=fps, name=self.label)
 
+    def _build_zed(self, resolution: tuple[int, int], fps: int) -> CameraDriver:
+        # Lazy: zed_camera imports pyzed at module level and raises an actionable ImportError
+        # when the SDK cannot be loaded; that message becomes the tile's error text.
+        from robots_realtime.sensors.cameras.zed_camera import ZedCamera  # noqa: PLC0415
 
-def discover_uvc_cameras() -> list[dict[str, str]]:
+        preset = self.zed_resolution or zed_resolution_for(resolution)
+        source = {"stream_ip": self.detail} if self.kind == "zed-stream" else {"device_id": self.detail}
+        # image_key="rgb": same key the session CameraNodes publish, so the tile shows the exact
+        # (rectified, left-eye) frame a policy would consume. Black-frame check off: a viewer
+        # should show a capped lens, not die on it.
+        return ZedCamera(
+            resolution=preset, fps=fps, image_key="rgb", check_black_frames=False, name=self.label, **source
+        )
+
+
+def _zed_sdk_hint() -> str:
+    if not ZED_SDK_DIR.is_dir():
+        return f"ZED SDK not installed at {ZED_SDK_DIR}"
+    if not (os.access(ZED_SDK_DIR, os.R_OK | os.X_OK) and os.access(ZED_SDK_DIR / "lib", os.R_OK | os.X_OK)):
+        return f"{ZED_SDK_DIR} is not readable by this user; fix: sudo chmod -R o+rX {ZED_SDK_DIR}"
+    return "pyzed is not installed in this venv; run `uv sync --extra sensors` (see scripts/setup_zed.sh)"
+
+
+def discover_zed_cameras() -> tuple[list[dict[str, str]], bool]:
+    """Enumerate USB ZED cameras and ZED SDK network streams.
+
+    Returns ``(cameras, sdk_available)``. ``sdk_available`` is False when ``pyzed`` cannot be
+    imported (SDK missing / unreadable / not installed in the venv); callers then leave any
+    Stereolabs UVC node in the plain-webcam list so the camera is at least viewable raw.
+    """
+    try:
+        from pyzed import sl  # noqa: PLC0415
+    except ImportError as exc:
+        logger.info("ZED discovery skipped: %s (%s)", _zed_sdk_hint(), exc)
+        return [], False
+
+    cameras: list[dict[str, str]] = []
+    try:
+        for dev in sl.Camera.get_device_list():
+            cameras.append(
+                {
+                    "kind": "zed",
+                    "serial": str(dev.serial_number),
+                    "model": str(dev.camera_model).replace("CAMERA_MODEL.", ""),
+                    "state": str(dev.camera_state).replace("CAMERA_STATE.", ""),
+                }
+            )
+        for props in sl.Camera.get_streaming_device_list():
+            cameras.append(
+                {
+                    "kind": "zed-stream",
+                    "serial": str(props.serial_number),
+                    "endpoint": f"{props.ip}:{props.port}",
+                    "codec": str(props.codec).replace("STREAMING_CODEC.", ""),
+                }
+            )
+    except Exception as exc:
+        logger.warning("ZED discovery failed: %s", exc)
+    return cameras, True
+
+
+def discover_uvc_cameras(exclude_stereolabs: bool = False) -> list[dict[str, str]]:
     """Enumerate non-RealSense V4L2 capture nodes from sysfs.
 
     UVC devices publish one node per function; the metadata node carries a
     non-zero ``index``, so ``index == 0`` selects the capture node. RealSense
-    cameras are excluded here because ``pyrealsense2`` owns them.
+    cameras are excluded here because ``pyrealsense2`` owns them; Stereolabs
+    nodes are excluded when ``pyzed`` owns them (``exclude_stereolabs``).
     """
     found: list[dict[str, str]] = []
     if not V4L_SYSFS.is_dir():
@@ -196,6 +292,8 @@ def discover_uvc_cameras() -> list[dict[str, str]]:
         usb = (node / "device").resolve().parent
         vid = _read_or_blank(usb / "idVendor")
         pid = _read_or_blank(usb / "idProduct")
+        if exclude_stereolabs and vid.lower() == STEREOLABS_USB_VENDOR:
+            continue
         product = _read_or_blank(usb / "product") or name
         found.append(
             {
@@ -231,13 +329,21 @@ def load_name_map(config_path: Optional[Path]) -> dict[str, str]:
     for node in (cfg or {}).get("nodes", []) or []:
         if not isinstance(node, dict) or node.get("type") != "CameraNode":
             continue
-        device_id, name = node.get("device_id"), node.get("name")
-        if device_id and name:
-            names[str(device_id)] = str(name)
+        name = node.get("name")
+        if not name:
+            continue
+        # RealSense/ZED: device_id is the serial. ZED-over-network: stream_ip is host[:port].
+        for key in ("device_id", "stream_ip"):
+            if node.get(key):
+                names[str(node[key])] = str(name)
     return names
 
 
-def discover_all(name_map: dict[str, str]) -> list[DeviceSpec]:
+def discover_all(
+    name_map: dict[str, str],
+    zed_streams: tuple[str, ...] = (),
+    zed_resolution: Optional[str] = None,
+) -> list[DeviceSpec]:
     specs: list[DeviceSpec] = []
 
     for cam in discover_realsense_cameras():
@@ -252,7 +358,49 @@ def discover_all(name_map: dict[str, str]) -> list[DeviceSpec]:
             )
         )
 
-    for cam in discover_uvc_cameras():
+    zed_cams, zed_sdk_available = discover_zed_cameras()
+    seen_streams: set[str] = set()
+    for cam in zed_cams:
+        if cam["kind"] == "zed":
+            specs.append(
+                DeviceSpec(
+                    id=f"zed-{cam['serial']}",
+                    label=name_map.get(cam["serial"], f"{cam['model']} {cam['serial'][-4:]}"),
+                    kind="zed",
+                    detail=cam["serial"],
+                    extra={"model": cam["model"], "state": cam["state"]},
+                    zed_resolution=zed_resolution,
+                )
+            )
+        else:
+            seen_streams.add(cam["endpoint"])
+            specs.append(
+                DeviceSpec(
+                    id=f"zedstream-{cam['endpoint'].replace(':', '-').replace('.', '-')}",
+                    label=name_map.get(
+                        cam["endpoint"], name_map.get(cam["endpoint"].split(":")[0], f"ZED stream {cam['serial']}")
+                    ),
+                    kind="zed-stream",
+                    detail=cam["endpoint"],
+                    extra={"serial": cam["serial"], "codec": cam["codec"]},
+                    zed_resolution=zed_resolution,
+                )
+            )
+    # Explicit --zed-stream endpoints (SDK multicast discovery does not cross subnets).
+    for endpoint in zed_streams:
+        if endpoint in seen_streams:
+            continue
+        specs.append(
+            DeviceSpec(
+                id=f"zedstream-{endpoint.replace(':', '-').replace('.', '-')}",
+                label=name_map.get(endpoint, name_map.get(endpoint.split(":")[0], f"ZED stream {endpoint}")),
+                kind="zed-stream",
+                detail=endpoint,
+                zed_resolution=zed_resolution,
+            )
+        )
+
+    for cam in discover_uvc_cameras(exclude_stereolabs=zed_sdk_available):
         path = cam["path"]
         specs.append(
             DeviceSpec(
@@ -263,6 +411,12 @@ def discover_all(name_map: dict[str, str]) -> list[DeviceSpec]:
                 extra={"usb_id": cam["usb_id"], "v4l_name": cam["name"]},
             )
         )
+        if cam["usb_id"].lower().startswith(f"{STEREOLABS_USB_VENDOR}:"):
+            logger.warning(
+                "%s is a Stereolabs ZED but pyzed is unavailable (%s); showing the raw UVC stereo frame",
+                path,
+                _zed_sdk_hint(),
+            )
 
     return specs
 
@@ -602,6 +756,19 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8080, help="bind port (default: %(default)s)")
     parser.add_argument("--resolution", type=parse_resolution, default="640x480", help="capture WxH (default: 640x480)")
     parser.add_argument("--fps", type=int, default=30, help="requested capture fps (default: %(default)s)")
+    parser.add_argument(
+        "--zed-resolution",
+        default=None,
+        choices=["VGA", "HD720", "HD1080", "HD2K", "SVGA", "HD1200", "AUTO"],
+        help="ZED preset override; default maps --resolution to the smallest USB-safe preset that covers it",
+    )
+    parser.add_argument(
+        "--zed-stream",
+        action="append",
+        default=[],
+        metavar="HOST[:PORT]",
+        help="ZED SDK network stream to add (e.g. a ZED X on a Jetson; port defaults to 30000). Repeatable.",
+    )
     parser.add_argument("--jpeg-quality", type=int, default=80, help="1-100 (default: %(default)s)")
     parser.add_argument(
         "--idle-timeout",
@@ -623,11 +790,14 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    specs = discover_all(load_name_map(args.names_from))
+    specs = discover_all(
+        load_name_map(args.names_from), zed_streams=tuple(args.zed_stream), zed_resolution=args.zed_resolution
+    )
     if not specs:
         raise SystemExit(
             "No cameras found. Check `lsusb`, and that this user can read /dev/video* "
-            "(RealSense needs the librealsense udev rules; plain webcams need group `video`)."
+            "(RealSense needs the librealsense udev rules; plain webcams need group `video`; "
+            f"ZED: `lsusb | grep {STEREOLABS_USB_VENDOR}` and {_zed_sdk_hint()})."
         )
 
     workers = {
@@ -726,6 +896,7 @@ INDEX_HTML = r"""<!doctype html>
   }
   .badge.realsense { background: #1d3a5c; color: #7cc0ff; }
   .badge.uvc { background: #3d2f1a; color: #e5b567; }
+  .badge.zed, .badge.zed-stream { background: #1f3d2a; color: #7fe0a0; }
   .stats { margin-left: auto; display: flex; gap: 9px; align-items: center; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
   .dot.streaming { background: var(--ok); }

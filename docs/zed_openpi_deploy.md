@@ -46,6 +46,16 @@ Look at `/tmp/zed_probe/zed_<serial>_policy224.jpg`: that letterboxed 224x224 im
 Use it to decide which serial is top / left / right, then paste the printed `CameraNode` entries into
 `configs/yam/yam_bimanual_openpi_policy_xdof_hq_us05_zed.yaml` (replace the `ZED_SERIAL_*` placeholders).
 
+For a live side-by-side view of every camera on the box (RealSense, ZED, webcams) in a browser:
+
+```bash
+uv run scripts/camera_web_viewer.py --names-from configs/yam/yam_bimanual_openpi_policy_xdof_hq_us05_zed.yaml
+uv run scripts/camera_web_viewer.py --zed-stream <jetson-ip>:30000     # ZED X streamed from a Jetson
+```
+
+ZED tiles go through `ZedCamera` (rectified left eye, `image_key: rgb`), so they show the same frame a session
+publishes. If the SDK is not loadable the ZED still appears, as a raw UVC tile, with the fix hint in the log.
+
 ## 3. Serve the checkpoint
 
 ```bash
