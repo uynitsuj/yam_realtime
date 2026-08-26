@@ -30,8 +30,8 @@ class MuJoCoYAMEnv(gym.Env):
     Actions and observations use the same 14D format as the real robot:
     [left_j1..6, left_grip, right_j1..6, right_grip].
 
-    This is a minimal, self-contained re-implementation that does not depend on
-    the private xdof-sim package.
+    This is a minimal, self-contained implementation with no external
+    simulation package dependency.
     """
 
     def __init__(

@@ -1,6 +1,6 @@
 # VR Streaming (Quest headset)
 
-`XdofSimNode` can stream the live MuJoCo scene to a Meta Quest headset over WebXR. It auto-starts when a Quest is detected — no extra setup beyond USB ADB.
+`MujocoSimNode` can stream the live MuJoCo scene to a Meta Quest headset over WebXR. It auto-starts when a Quest is detected — no extra setup beyond USB ADB.
 
 ## Setup
 

@@ -111,7 +111,7 @@ nodes:
       # once more on the first RTC inference, then nothing for subsequent ones.
       # rtc_debug: true
       # Image pre-processing MUST match the training augmentation for your
-      # checkpoint. Lab42 / PI OpenPI YAM runs use center-crop (crop to a
+      # checkpoint. OpenPI YAM runs use center-crop (crop to a
       # min(H,W) square from centre, then resize). resize_with_pad adds
       # black bars which are OOD for the model → erratic actions.
       image_preprocess: center_crop             # center_crop | pad

@@ -2,7 +2,8 @@ version: "1"
 
 # Bimanual YAM teleop driven by two *passive* GELLO leaders on SocketCAN.
 # Requires:
-#   - can_lead_l / can_lead_r brought up at 1 Mbit/s (see xdof/scripts/reset_all_can.sh)
+#   - can_lead_l / can_lead_r brought up at 1 Mbit/s, e.g. per interface:
+#       sudo ip link set <iface> type can bitrate 1000000 && sudo ip link set <iface> up
 #   - All 7 encoder devices per arm powered on and streaming 0x50F reports
 #   - python-can installed (added via pyproject)
 

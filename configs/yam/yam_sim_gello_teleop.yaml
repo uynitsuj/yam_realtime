@@ -29,7 +29,7 @@ nodes:
     loop_mode: fixed_rate
     poll_freq: 200
 
-  - type: XdofSimNode
+  - type: MujocoSimNode
     name: yam
     scene: hybrid
     task: bottles

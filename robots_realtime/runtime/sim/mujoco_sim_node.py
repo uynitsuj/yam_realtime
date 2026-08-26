@@ -1,6 +1,6 @@
-"""XdofSimNode — unified bimanual YAM sim node (physics + cameras + recording).
+"""MujocoSimNode — unified bimanual YAM sim node (physics + cameras + recording).
 
-Mirrors market42's XdofSimNode pattern:
+Design:
 - Physics steps flat-out in main thread
 - Cameras rendered + viser previews in background thread at camera_fps
 - Viser browser viewer (http://localhost:viser_port) with live body poses and
@@ -428,10 +428,10 @@ class _ViserSceneManager:
 
 
 # ---------------------------------------------------------------------------
-# XdofSimNode
+# MujocoSimNode
 # ---------------------------------------------------------------------------
 
-class XdofSimNode(Node):
+class MujocoSimNode(Node):
     """Unified bimanual YAM simulation node.
 
     Owns the MuJoCo environment directly; manages physics stepping in the main
@@ -448,7 +448,7 @@ class XdofSimNode(Node):
         viser_port:         Viser server port. None to disable.
         vr_port:            VR streaming port. None to disable; auto-starts
                             only when a Quest device is detected via ADB.
-        writer:             Ignored — XdofSimNode manages its own writers.
+        writer:             Ignored — MujocoSimNode manages its own writers.
     """
 
     role = NodeRole.ROBOT

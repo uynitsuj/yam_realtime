@@ -119,7 +119,7 @@
     </body>
     <geom name="table_plane" type="plane" size="0.2975 0.65 0.01" pos="0.6 0 0.75" rgba="0 0 0 0" group="3"/>
 
-    <!-- 6 plastic bottles scattered on the table (matching xdof training data variety) -->
+    <!-- 6 plastic bottles scattered on the table (matching the training data variety) -->
 
     <!-- Bottle 1: Green, lying on side along Y -->
 

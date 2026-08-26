@@ -1,3 +1,3 @@
-from robots_realtime.runtime.sim.xdof_sim_node import XdofSimNode
+from robots_realtime.runtime.sim.mujoco_sim_node import MujocoSimNode
 
-__all__ = ["XdofSimNode"]
+__all__ = ["MujocoSimNode"]

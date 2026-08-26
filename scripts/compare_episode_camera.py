@@ -2,7 +2,7 @@
 
 Usage:
     uv run python scripts/compare_episode_camera.py \
-        --s3-path xdof-internal-research/repromo/hlm_tshirt_reward_select_lerobot_sarm_8stage \
+        --s3-path my-bucket/path/to/lerobot_dataset \
         --camera-id 0 \
         --camera-views top left right
 
@@ -38,8 +38,8 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compare S3 episode first-frames with live camera")
     p.add_argument(
         "--s3-path",
-        default="xdof-internal-research/repromo/hlm_tshirt_reward_select_lerobot_sarm_8stage",
-        help="S3 bucket/prefix (no s3:// prefix)",
+        required=True,
+        help="S3 bucket/prefix of the LeRobot dataset (no s3:// prefix)",
     )
     p.add_argument("--camera-serial", type=str, default=None, help="RealSense serial for a single live camera (overrides --camera-config mapping)")
     p.add_argument(

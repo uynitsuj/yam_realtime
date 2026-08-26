@@ -1,7 +1,6 @@
 """Intel RealSense camera driver (pyrealsense2) for the ``CameraDriver`` protocol.
 
-Adapted from market42-bair (``market42/nodes/cameras/realsense.py``) to fit
-robots_realtime's simpler driver interface — this class only implements
+This class only implements
 ``read() / stop() / get_camera_info() / read_calibration_data_intrinsics()``;
 recording and ZMQ publishing are handled upstream by ``CameraNode``.
 

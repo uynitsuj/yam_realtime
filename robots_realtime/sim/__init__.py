@@ -1,7 +1,7 @@
 """Minimal self-contained MuJoCo simulation for the bimanual YAM robot.
 
-Does not depend on the private xdof-sim package. Assets (XML + STL meshes)
-are bundled under robots_realtime/sim/models/.
+Self-contained — no external simulation package required. Assets (XML + STL
+meshes) are bundled under robots_realtime/sim/models/.
 
 Quick start:
     import robots_realtime.sim as sim

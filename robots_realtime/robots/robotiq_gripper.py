@@ -757,7 +757,7 @@ class RobotiqGripperRobot(Robot):
                     rate_recorder.track()
                 except RuntimeError as e:
                     logger.error(
-                        f"Robotiq gripper frequency is too low. {self._robotiq_min_frequency} Hz is required. Solution: 1. Run: xdof/scripts/ftdi_latency_config.sh. or 2. set robotiq_min_frequency=None"
+                        f"Robotiq gripper frequency is too low. {self._robotiq_min_frequency} Hz is required. Solution: 1. Set the FTDI latency timer to 1 ms: echo 1 | sudo tee /sys/bus/usb-serial/devices/<ttyUSBn>/latency_timer. or 2. set robotiq_min_frequency=None"
                     )
                     # raise e
                 time.sleep(0.001)

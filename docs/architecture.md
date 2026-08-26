@@ -30,7 +30,7 @@ Every session is a graph of **nodes**, each running in its own subprocess with i
 **Environment nodes** — consume commands, produce observations:
 - `RobotNode` — any robot with `command_joint_pos()` / `get_observations()`
 - `CameraNode` — any camera with a `read() -> CameraData` driver
-- `XdofSimNode` — bimanual YAM MuJoCo simulation with live Viser viewer and optional Quest VR streaming
+- `MujocoSimNode` — bimanual YAM MuJoCo simulation with live Viser viewer and optional Quest VR streaming
 
 ## Loop modes
 

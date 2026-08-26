@@ -11,7 +11,7 @@ Session YAML schema:
         name: gello_left
         arm: left
         ...
-      - type: XdofSimNode
+      - type: MujocoSimNode
         name: yam_sim
         cmd_topics:
           left: gello_left/joint_pos
@@ -37,7 +37,7 @@ _NODE_REGISTRY: dict[str, str] = {
     "AgentNode":        "robots_realtime.runtime.agent_node:AgentNode",
     "RobotNode":        "robots_realtime.runtime.environment.robot_node:RobotNode",
     "CameraNode":       "robots_realtime.runtime.environment.camera_node:CameraNode",
-    "XdofSimNode":      "robots_realtime.runtime.sim.xdof_sim_node:XdofSimNode",
+    "MujocoSimNode":    "robots_realtime.runtime.sim.mujoco_sim_node:MujocoSimNode",
     "ViserTeleopNode":  "robots_realtime.runtime.viser_teleop_node:ViserTeleopNode",
     "ViserMonitorNode": "robots_realtime.runtime.viser_monitor_node:ViserMonitorNode",
 }
@@ -66,9 +66,9 @@ def _make_writer_for_node(node_cls, node_params: dict):
     from robots_realtime.runtime.recording import McapWriter, AsyncMp4Writer, NullWriter
     from robots_realtime.runtime.node import NodeRole
 
-    # XdofSimNode manages its own writers — give it NullWriter
+    # MujocoSimNode manages its own writers — give it NullWriter
     type_name = node_params.get("type", "")
-    if type_name == "XdofSimNode":
+    if type_name == "MujocoSimNode":
         return NullWriter()
 
     # Check role
