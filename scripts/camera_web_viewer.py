@@ -13,7 +13,7 @@ Run it::
     uv run scripts/camera_web_viewer.py --names-from configs/yam/<session>.yaml
     uv run scripts/camera_web_viewer.py --zed-stream 10.0.128.50:30000 --zed-resolution HD1080
     uv run scripts/camera_web_viewer.py --resolution native --uvc-view 800x600   # full sensor + lab42-style tile
-    uv run scripts/camera_web_viewer.py --resolution native --uvc-fps 60         # Decxin ~36 fps at 1280x1024
+    uv run scripts/camera_web_viewer.py --resolution native --uvc-fps 60         # Decxin at 60 fps, D405 stays 30
 
 ``--resolution native`` opens every device in its largest mode (RealSense: biggest
 colour profile, 1280x720 on a D405; UVC: biggest advertised MJPG size, 1280x1024 on
@@ -74,6 +74,8 @@ from robots_realtime.sensors.cameras.realsense_camera import (
 logger = logging.getLogger("camera_web_viewer")
 
 V4L_SYSFS = Path("/sys/class/video4linux")
+# Seconds a freshly opened device may keep failing reads before its tile turns red.
+FIRST_FRAME_GRACE_S = 5.0
 
 
 # --------------------------------------------------------------------------- #
@@ -147,9 +149,12 @@ class UvcCamera(CameraDriver):
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
         self.cap.set(cv2.CAP_PROP_FPS, self.fps)
-        # Keep the driver-side queue shallow so read() returns the newest frame
-        # rather than draining a backlog when a viewer reconnects.
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # Two driver buffers, not one: with a single buffer uvcvideo has nothing to
+        # fill while userspace holds the current frame and silently drops the next
+        # one. Measured on a Decxin at 1280x1024: buffersize=1 gives 18.7 fps when
+        # asked for 30 and 34 fps when asked for 60; buffersize=2 gives 30.0 and
+        # 60.0. Two keeps the backlog to at most one frame for latency's sake.
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
 
     def read(self) -> CameraData:
         ok, frame = self.cap.read()
@@ -863,6 +868,10 @@ class CameraWorker:
         window_start = time.monotonic()
         window_frames = 0
         consecutive_errors = 0
+        # A UVC camera that was plugged in seconds ago can fail its first reads for a
+        # while; give the first frame a grace period before declaring the tile broken.
+        first_frame_deadline = time.monotonic() + FIRST_FRAME_GRACE_S
+        got_frame = False
 
         try:
             while True:
@@ -873,10 +882,11 @@ class CameraWorker:
                 try:
                     data = driver.read()
                     consecutive_errors = 0
+                    got_frame = True
                 except Exception as exc:
                     consecutive_errors += 1
                     logger.debug("%s: read failed: %s", self.spec.id, exc)
-                    if consecutive_errors >= 10:
+                    if consecutive_errors >= 10 and (got_frame or time.monotonic() > first_frame_deadline):
                         with self._cond:
                             self._status = "error"
                             self._error = f"read failed: {exc}"
@@ -1066,8 +1076,8 @@ def main() -> None:
         "--uvc-fps",
         type=int,
         default=None,
-        help="fps requested from UVC cameras only (default: --fps). The Decxin delivers ~20 fps when asked for 30 "
-        "at 1280x1024 but ~36 fps when asked for 60, while the D405 has no 60 fps profile at 1280x720.",
+        help="fps requested from UVC cameras only (default: --fps), e.g. 60 for a Decxin at 1280x1024 "
+        "while the D405 keeps 30 (it has no 60 fps profile at 1280x720).",
     )
     parser.add_argument(
         "--zed-resolution",
