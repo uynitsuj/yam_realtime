@@ -84,7 +84,7 @@ def _safe(label: str) -> str:
 def snapshot_camera(
     spec: DeviceSpec,
     out_dir: Path,
-    resolution: tuple[int, int],
+    resolution: tuple[int, int] | None,
     fps: int,
     warmup_s: float,
     frames: int,
@@ -139,7 +139,7 @@ def snapshot_camera(
             kind=spec.kind,
             detail=spec.detail,
             extra=spec.extra,
-            requested_resolution=list(resolution),
+            requested_resolution=list(resolution) if resolution else "native",
             requested_fps=fps,
             frame_shape=list(last_rgb.shape),
             warmup_frames=n_warm,
@@ -185,7 +185,9 @@ def main() -> int:
     parser.add_argument("--out-root", type=Path, default=Path("recordings/camera_snapshots"))
     parser.add_argument("--tag", default=None, help="appended to the folder name, e.g. before_wrist_swap")
     parser.add_argument("--names-from", type=Path, default=None, help="session YAML for friendly camera names")
-    parser.add_argument("--resolution", type=parse_resolution, default="640x480", help="capture WxH (default 640x480)")
+    parser.add_argument(
+        "--resolution", type=parse_resolution, default="640x480", help="capture WxH or `native` (default 640x480)"
+    )
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--warmup-s", type=float, default=2.0, help="seconds of frames discarded for AE/AWB to settle")
     parser.add_argument("--frames", type=int, default=1, help="snapshots per camera")
@@ -225,7 +227,7 @@ def main() -> int:
     manifest = {
         "captured_at": datetime.now().isoformat(timespec="seconds"),
         "tag": args.tag,
-        "resolution": list(args.resolution),
+        "resolution": list(args.resolution) if args.resolution else "native",
         "fps": args.fps,
         "names_from": str(args.names_from) if args.names_from else None,
         "cameras": [{k: v for k, v in r.items() if not k.startswith("_")} for r in records],

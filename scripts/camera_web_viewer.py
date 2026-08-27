@@ -12,6 +12,17 @@ Run it::
     uv run scripts/camera_web_viewer.py --port 9000 --fps 15
     uv run scripts/camera_web_viewer.py --names-from configs/yam/<session>.yaml
     uv run scripts/camera_web_viewer.py --zed-stream 10.0.128.50:30000 --zed-resolution HD1080
+    uv run scripts/camera_web_viewer.py --resolution native --uvc-view 800x600   # full sensor + lab42-style tile
+
+``--resolution native`` opens every device in its largest mode (RealSense: biggest
+colour profile, 1280x720 on a D405; UVC: biggest advertised MJPG size, 1280x1024 on
+a Decxin) instead of the 640x480 default. Beware that many UVC cameras implement
+their lower modes as sensor *windows*: the Decxin's 640x480 is the pixel-for-pixel
+centre of its 1280x1024 sensor (half the field of view), 1280x720 is a row window,
+while 800x600 is the whole sensor scaled. ``--uvc-view WxH[:crop|scale]`` adds, per
+UVC camera, an extra tile that emulates that mode from the native frame, so the
+native view and e.g. the 800x600 the lab42 station configs record can be compared
+side by side without re-opening the device (V4L2 allows one opener per device).
 
 ZED tiles show the rectified LEFT eye through ``ZedCamera`` (``image_key="rgb"``),
 i.e. the same frame a session's CameraNode publishes, so they are directly
@@ -40,11 +51,13 @@ import asyncio
 import grp
 import logging
 import os
+import re
 import signal
 import socket
+import subprocess
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -162,6 +175,221 @@ class UvcCamera(CameraDriver):
             self.cap = None
 
 
+class SharedUvcSource:
+    """One opener per UVC device, fanning frames out to several ``UvcView`` drivers.
+
+    V4L2 allows a single streaming owner per device, so a native tile and an
+    emulated-mode tile of the same camera cannot both open it. The source opens the
+    device once (at the resolution the first view asks for), reads it in one thread,
+    and every view picks up the newest frame. The device is released when the last
+    view stops.
+    """
+
+    _registry: dict[str, "SharedUvcSource"] = {}
+    _registry_lock = threading.Lock()
+
+    @classmethod
+    def get(cls, device_path: str) -> "SharedUvcSource":
+        with cls._registry_lock:
+            src = cls._registry.get(device_path)
+            if src is None:
+                src = cls._registry[device_path] = cls(device_path)
+            return src
+
+    def __init__(self, device_path: str) -> None:
+        self.device_path = device_path
+        self._cond = threading.Condition()
+        self._refs = 0
+        self._camera: Optional[UvcCamera] = None
+        self._thread: Optional[threading.Thread] = None
+        self._frame: Optional[np.ndarray] = None
+        self._ts = 0.0
+        self._seq = 0
+        self._error: Optional[Exception] = None
+
+    @property
+    def resolution(self) -> Optional[tuple[int, int]]:
+        cam = self._camera
+        return None if cam is None else tuple(cam.resolution)
+
+    def acquire(self, resolution: tuple[int, int], fps: int, label: Optional[str]) -> None:
+        with self._cond:
+            if self._camera is None:
+                self._camera = UvcCamera(device_path=self.device_path, resolution=resolution, fps=fps, name=label)
+                self._frame, self._seq, self._error = None, 0, None
+                self._thread = threading.Thread(target=self._run, name=f"uvc-src-{self.device_path}", daemon=True)
+                self._thread.start()
+            elif tuple(self._camera.resolution) != tuple(resolution):
+                logger.warning(
+                    "%s is already open at %s; a view asked for %s and will share the open stream",
+                    self.device_path, self._camera.resolution, resolution,
+                )
+            self._refs += 1
+
+    def release(self) -> None:
+        with self._cond:
+            self._refs -= 1
+            if self._refs > 0:
+                return
+            cam, self._camera = self._camera, None
+            self._cond.notify_all()
+        if self._thread is not None:
+            self._thread.join(timeout=3.0)
+            self._thread = None
+        if cam is not None:
+            cam.stop()
+
+    def _run(self) -> None:
+        while True:
+            with self._cond:
+                cam = self._camera
+            if cam is None:
+                return
+            try:
+                data = cam.read()
+            except Exception as exc:  # noqa: BLE001 - surfaced to every view via wait_frame
+                with self._cond:
+                    self._error = exc
+                    self._seq += 1
+                    self._cond.notify_all()
+                time.sleep(0.05)
+                continue
+            with self._cond:
+                self._frame = data.images["rgb"]
+                self._ts = data.timestamp
+                self._error = None
+                self._seq += 1
+                self._cond.notify_all()
+
+    def wait_frame(self, after_seq: int, timeout_s: float = 2.0) -> tuple[np.ndarray, float, int]:
+        with self._cond:
+            if not self._cond.wait_for(lambda: self._seq > after_seq or self._camera is None, timeout=timeout_s):
+                raise RuntimeError(f"{self.device_path}: no frame within {timeout_s:.0f}s")
+            if self._camera is None:
+                raise RuntimeError(f"{self.device_path}: source closed")
+            if self._error is not None:
+                raise RuntimeError(f"{self.device_path}: {self._error}")
+            return self._frame, self._ts, self._seq
+
+
+def emulate_uvc_mode(frame: np.ndarray, mode: tuple[int, int], kind: str = "auto") -> np.ndarray:
+    """Reproduce what the camera firmware delivers for a lower UVC mode, from a native frame.
+
+    Measured on the Decxin (Realtek 0bda:5883, 1280x1024 sensor), correlation against the
+    real hardware mode: 640x480 = 1:1 centre window (0.997), 1280x720 = 1:1 row window
+    (0.999), 800x600 = whole sensor scaled to 800x640 then 20 rows trimmed top/bottom
+    (0.997; a plain squish only reaches 0.90). ``auto`` therefore crops when the mode is
+    full-width or at most half the sensor width, and scales otherwise.
+    """
+    h, w = frame.shape[:2]
+    mw, mh = mode
+    if kind == "auto":
+        kind = "crop" if (mw == w or 2 * mw <= w) else "scale"
+    if kind == "crop":
+        y0, x0 = max(0, (h - mh) // 2), max(0, (w - mw) // 2)
+        return frame[y0 : y0 + mh, x0 : x0 + mw]
+    scale = max(mw / w, mh / h)
+    scaled = cv2.resize(frame, (max(mw, round(w * scale)), max(mh, round(h * scale))), interpolation=cv2.INTER_AREA)
+    sh, sw = scaled.shape[:2]
+    y0, x0 = (sh - mh) // 2, (sw - mw) // 2
+    return scaled[y0 : y0 + mh, x0 : x0 + mw]
+
+
+@dataclass
+class UvcView(CameraDriver):
+    """A ``CameraDriver`` onto a ``SharedUvcSource``: passthrough, or an emulated lower mode."""
+
+    device_path: str
+    resolution: tuple[int, int]  # device (source) mode to open
+    fps: int = 30
+    name: Optional[str] = None
+    mode: Optional[tuple[int, int]] = None  # emulate this device mode from the source frame; None = passthrough
+    mode_kind: str = "auto"  # auto | crop | scale
+
+    def __post_init__(self) -> None:
+        self._source = SharedUvcSource.get(self.device_path)
+        self._source.acquire(tuple(self.resolution), self.fps, self.name)
+        self._seq = 0
+        self._released = False
+
+    def read(self) -> CameraData:
+        frame, ts, self._seq = self._source.wait_frame(self._seq)
+        if self.mode is not None:
+            frame = emulate_uvc_mode(frame, tuple(self.mode), self.mode_kind)
+        return CameraData(images={"rgb": frame}, timestamp=ts)
+
+    def read_calibration_data_intrinsics(self) -> dict[str, Any]:
+        return {}
+
+    def get_camera_info(self) -> dict[str, Any]:
+        src = self._source.resolution or tuple(self.resolution)
+        out = tuple(self.mode) if self.mode is not None else src
+        return {
+            "device_id": self.device_path,
+            "source_width": src[0],
+            "source_height": src[1],
+            "width": out[0],
+            "height": out[1],
+            "fps": self.fps,
+            "emulated_mode": f"{out[0]}x{out[1]} ({self.mode_kind})" if self.mode is not None else None,
+        }
+
+    def stop(self) -> None:
+        if not self._released:
+            self._released = True
+            self._source.release()
+
+
+_V4L_SIZE_RE = re.compile(r"Size: Discrete (\d+)x(\d+)")
+
+
+def uvc_native_resolution(device_path: str) -> tuple[int, int]:
+    """Largest MJPG frame size the UVC device advertises (via ``v4l2-ctl``); 640x480 if unknown."""
+    try:
+        out = subprocess.run(
+            ["v4l2-ctl", "-d", device_path, "--list-formats-ext"], capture_output=True, text=True, timeout=5
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("%s: v4l2-ctl unavailable (%s); assuming 640x480 native", device_path, exc)
+        return (640, 480)
+    best: Optional[tuple[int, int]] = None
+    in_mjpg = False
+    for line in out.splitlines():
+        if line.strip().startswith("["):
+            in_mjpg = "MJPG" in line
+            continue
+        m = _V4L_SIZE_RE.search(line)
+        if m and in_mjpg:
+            cand = (int(m.group(1)), int(m.group(2)))
+            if best is None or cand[0] * cand[1] > best[0] * best[1]:
+                best = cand
+    return best or (640, 480)
+
+
+def realsense_native_resolution(serial: str, fps: int) -> tuple[int, int]:
+    """Largest colour profile the RealSense offers at >= ``fps`` (D405: 1280x720 @ 30)."""
+    try:
+        import pyrealsense2 as rs  # noqa: PLC0415
+
+        for dev in rs.context().query_devices():
+            if dev.get_info(rs.camera_info.serial_number) != serial:
+                continue
+            best: Optional[tuple[int, int]] = None
+            for sensor in dev.query_sensors():
+                for prof in sensor.get_stream_profiles():
+                    if not prof.is_video_stream_profile() or prof.stream_type() != rs.stream.color or prof.fps() < fps:
+                        continue
+                    video = prof.as_video_stream_profile()
+                    cand = (video.width(), video.height())
+                    if best is None or cand[0] * cand[1] > best[0] * best[1]:
+                        best = cand
+            if best is not None:
+                return best
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("realsense native lookup failed for %s: %s", serial, exc)
+    return (1280, 720)
+
+
 # --------------------------------------------------------------------------- #
 # Discovery
 # --------------------------------------------------------------------------- #
@@ -194,25 +422,38 @@ class DeviceSpec:
 
     id: str
     label: str
-    kind: str  # "realsense" | "uvc" | "zed" | "zed-stream"
+    kind: str  # "realsense" | "uvc" | "uvc-mode" | "zed" | "zed-stream"
     detail: str  # serial number, /dev path, or host:port
     extra: dict[str, str] = field(default_factory=dict)
     # ZED preset override ("HD720", ...). None = derive from the requested WxH.
     zed_resolution: Optional[str] = None
+    # Per-device capture resolution; overrides the global one (used to pin UVC sources to native).
+    resolution: Optional[tuple[int, int]] = None
+    # "uvc-mode" tiles: emulate this device mode from the shared native frame.
+    uvc_mode: Optional[tuple[int, int]] = None
+    uvc_mode_kind: str = "auto"
 
-    def build(self, resolution: tuple[int, int], fps: int) -> CameraDriver:
+    def build(self, resolution: Optional[tuple[int, int]], fps: int) -> CameraDriver:
+        """Open the device. ``resolution=None`` means the device's largest native mode."""
+        resolution = self.resolution or resolution
         if self.kind == "realsense":
-            return RealSenseCamera(device_id=self.detail, resolution=resolution, fps=fps)
+            res = resolution or realsense_native_resolution(self.detail, fps)
+            return RealSenseCamera(device_id=self.detail, resolution=res, fps=fps)
         if self.kind in ("zed", "zed-stream"):
             return self._build_zed(resolution, fps)
-        return UvcCamera(device_path=self.detail, resolution=resolution, fps=fps, name=self.label)
+        res = resolution or uvc_native_resolution(self.detail)
+        return UvcView(
+            device_path=self.detail, resolution=res, fps=fps, name=self.label,
+            mode=self.uvc_mode, mode_kind=self.uvc_mode_kind,
+        )
 
-    def _build_zed(self, resolution: tuple[int, int], fps: int) -> CameraDriver:
+    def _build_zed(self, resolution: Optional[tuple[int, int]], fps: int) -> CameraDriver:
         # Lazy: zed_camera imports pyzed at module level and raises an actionable ImportError
         # when the SDK cannot be loaded; that message becomes the tile's error text.
         from robots_realtime.sensors.cameras.zed_camera import ZedCamera  # noqa: PLC0415
 
-        preset = self.zed_resolution or zed_resolution_for(resolution)
+        # AUTO lets the SDK pick the camera's native mode when no WxH was requested.
+        preset = self.zed_resolution or (zed_resolution_for(resolution) if resolution else "AUTO")
         source = {"stream_ip": self.detail} if self.kind == "zed-stream" else {"device_id": self.detail}
         # image_key="rgb": same key the session CameraNodes publish, so the tile shows the exact
         # (rectified, left-eye) frame a policy would consume. Black-frame check off: a viewer
@@ -301,6 +542,10 @@ def discover_uvc_cameras(exclude_stereolabs: bool = False) -> list[dict[str, str
                 "name": name,
                 "product": product,
                 "usb_id": f"{vid}:{pid}" if vid and pid else "",
+                # Generic bridges ship one serial for every unit (Decxin: "YHTek"), so the
+                # physical USB port is the only stable way to tell two of them apart.
+                "serial": _read_or_blank(usb / "serial"),
+                "port": usb.name,
             }
         )
     return found
@@ -405,10 +650,12 @@ def discover_all(
         specs.append(
             DeviceSpec(
                 id=f"uvc-{path.rsplit('/', 1)[-1]}",
-                label=name_map.get(path, cam["product"]),
+                label=name_map.get(path, f"{cam['product']} {cam['port']}".strip()),
                 kind="uvc",
                 detail=path,
-                extra={"usb_id": cam["usb_id"], "v4l_name": cam["name"]},
+                extra={
+                    "usb_id": cam["usb_id"], "v4l_name": cam["name"], "serial": cam["serial"], "usb_port": cam["port"]
+                },
             )
         )
         if cam["usb_id"].lower().startswith(f"{STEREOLABS_USB_VENDOR}:"):
@@ -419,6 +666,44 @@ def discover_all(
             )
 
     return specs
+
+
+def parse_uvc_view(value: str) -> tuple[tuple[int, int], str]:
+    """``WxH`` or ``WxH:crop`` / ``WxH:scale`` -> ((w, h), kind)."""
+    mode, _, kind = value.partition(":")
+    kind = kind or "auto"
+    if kind not in ("auto", "crop", "scale"):
+        raise argparse.ArgumentTypeError(f"--uvc-view kind must be crop|scale|auto, got {kind!r}")
+    res = parse_resolution(mode)
+    if res is None:
+        raise argparse.ArgumentTypeError("--uvc-view needs an explicit WxH")
+    return res, kind
+
+
+def expand_uvc_views(specs: list[DeviceSpec], views: list[tuple[tuple[int, int], str]]) -> list[DeviceSpec]:
+    """Per UVC camera: pin the native tile to the device's largest mode and add one emulated tile per view."""
+    out: list[DeviceSpec] = []
+    for spec in specs:
+        if spec.kind != "uvc":
+            out.append(spec)
+            continue
+        native = spec.resolution or uvc_native_resolution(spec.detail)
+        native_txt = f"{native[0]}x{native[1]}"
+        out.append(replace(spec, resolution=native, extra={**spec.extra, "mode": f"{native_txt} native"}))
+        for (mw, mh), kind in views:
+            out.append(
+                replace(
+                    spec,
+                    id=f"{spec.id}-{mw}x{mh}",
+                    label=f"{spec.label} @{mw}x{mh}",
+                    kind="uvc-mode",
+                    resolution=native,
+                    uvc_mode=(mw, mh),
+                    uvc_mode_kind=kind,
+                    extra={**spec.extra, "mode": f"{mw}x{mh} emulated ({kind}) from {native_txt}"},
+                )
+            )
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -469,7 +754,7 @@ class CameraWorker:
     def __init__(
         self,
         spec: DeviceSpec,
-        resolution: tuple[int, int],
+        resolution: Optional[tuple[int, int]],
         fps: int,
         jpeg_quality: int,
         idle_timeout_s: float,
@@ -745,7 +1030,10 @@ def _lan_ip() -> str:
             return "127.0.0.1"
 
 
-def parse_resolution(value: str) -> tuple[int, int]:
+def parse_resolution(value: str) -> Optional[tuple[int, int]]:
+    """``WxH`` -> (w, h); ``native`` -> None (each device's largest advertised mode)."""
+    if value.strip().lower() == "native":
+        return None
     width, height = value.lower().split("x", 1)
     return int(width), int(height)
 
@@ -754,7 +1042,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--host", default="0.0.0.0", help="bind address (default: %(default)s)")
     parser.add_argument("--port", type=int, default=8080, help="bind port (default: %(default)s)")
-    parser.add_argument("--resolution", type=parse_resolution, default="640x480", help="capture WxH (default: 640x480)")
+    parser.add_argument(
+        "--resolution",
+        type=parse_resolution,
+        default="640x480",
+        help="capture WxH, or `native` for each device's largest mode (default: 640x480)",
+    )
+    parser.add_argument(
+        "--uvc-view",
+        action="append",
+        type=parse_uvc_view,
+        default=[],
+        metavar="WxH[:crop|scale]",
+        help="per UVC camera, add a tile emulating that device mode from the native frame "
+        "(forces native capture on UVC devices; repeatable)",
+    )
     parser.add_argument("--fps", type=int, default=30, help="requested capture fps (default: %(default)s)")
     parser.add_argument(
         "--zed-resolution",
@@ -793,6 +1095,8 @@ def main() -> None:
     specs = discover_all(
         load_name_map(args.names_from), zed_streams=tuple(args.zed_stream), zed_resolution=args.zed_resolution
     )
+    if args.uvc_view:
+        specs = expand_uvc_views(specs, args.uvc_view)
     if not specs:
         raise SystemExit(
             "No cameras found. Check `lsusb`, and that this user can read /dev/video* "
@@ -805,9 +1109,11 @@ def main() -> None:
         for spec in specs
     }
 
-    print(f"\nDiscovered {len(specs)} camera(s):")
+    res_txt = "native" if args.resolution is None else f"{args.resolution[0]}x{args.resolution[1]}"
+    print(f"\nDiscovered {len(specs)} camera tile(s) (capture: {res_txt}):")
     for spec in specs:
-        print(f"  - {spec.label:<24} [{spec.kind}] {spec.detail}")
+        mode = spec.extra.get("mode", "")
+        print(f"  - {spec.label:<28} [{spec.kind}] {spec.detail} {mode}")
     host_display = _lan_ip() if args.host == "0.0.0.0" else args.host
     # flush: stdout is block-buffered when redirected to a log, and uvicorn.run
     # never returns, so the banner would otherwise never appear.
@@ -897,6 +1203,7 @@ INDEX_HTML = r"""<!doctype html>
   .badge.realsense { background: #1d3a5c; color: #7cc0ff; }
   .badge.uvc { background: #3d2f1a; color: #e5b567; }
   .badge.zed, .badge.zed-stream { background: #1f3d2a; color: #7fe0a0; }
+  .badge.uvc-mode { background: #2a2a3d; color: #b8a6ff; }
   .stats { margin-left: auto; display: flex; gap: 9px; align-items: center; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
   .dot.streaming { background: var(--ok); }
