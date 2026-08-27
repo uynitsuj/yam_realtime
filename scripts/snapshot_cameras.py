@@ -32,6 +32,7 @@ import json
 import logging
 import sys
 import time
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -189,6 +190,9 @@ def main() -> int:
         "--resolution", type=parse_resolution, default="640x480", help="capture WxH or `native` (default 640x480)"
     )
     parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument(
+        "--uvc-fps", type=int, default=None, help="fps requested from UVC cameras only (default: --fps)"
+    )
     parser.add_argument("--warmup-s", type=float, default=2.0, help="seconds of frames discarded for AE/AWB to settle")
     parser.add_argument("--frames", type=int, default=1, help="snapshots per camera")
     parser.add_argument("--interval", type=float, default=0.5, help="seconds between snapshots when --frames > 1")
@@ -206,6 +210,8 @@ def main() -> int:
     )
     if args.only:
         specs = [s for s in specs if any(k in f"{s.label} {s.detail} {s.id}" for k in args.only)]
+    if args.uvc_fps is not None:
+        specs = [replace(s, fps=args.uvc_fps) if s.kind in ("uvc", "uvc-mode") else s for s in specs]
     if not specs:
         logger.error("no cameras found (after --only filter)")
         return 1

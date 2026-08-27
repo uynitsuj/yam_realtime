@@ -13,6 +13,7 @@ Run it::
     uv run scripts/camera_web_viewer.py --names-from configs/yam/<session>.yaml
     uv run scripts/camera_web_viewer.py --zed-stream 10.0.128.50:30000 --zed-resolution HD1080
     uv run scripts/camera_web_viewer.py --resolution native --uvc-view 800x600   # full sensor + lab42-style tile
+    uv run scripts/camera_web_viewer.py --resolution native --uvc-fps 60         # Decxin ~36 fps at 1280x1024
 
 ``--resolution native`` opens every device in its largest mode (RealSense: biggest
 colour profile, 1280x720 on a D405; UVC: biggest advertised MJPG size, 1280x1024 on
@@ -429,6 +430,8 @@ class DeviceSpec:
     zed_resolution: Optional[str] = None
     # Per-device capture resolution; overrides the global one (used to pin UVC sources to native).
     resolution: Optional[tuple[int, int]] = None
+    # Per-device frame-rate request; overrides the global one (see --uvc-fps).
+    fps: Optional[int] = None
     # "uvc-mode" tiles: emulate this device mode from the shared native frame.
     uvc_mode: Optional[tuple[int, int]] = None
     uvc_mode_kind: str = "auto"
@@ -436,6 +439,7 @@ class DeviceSpec:
     def build(self, resolution: Optional[tuple[int, int]], fps: int) -> CameraDriver:
         """Open the device. ``resolution=None`` means the device's largest native mode."""
         resolution = self.resolution or resolution
+        fps = self.fps or fps
         if self.kind == "realsense":
             res = resolution or realsense_native_resolution(self.detail, fps)
             return RealSenseCamera(device_id=self.detail, resolution=res, fps=fps)
@@ -1059,6 +1063,13 @@ def main() -> None:
     )
     parser.add_argument("--fps", type=int, default=30, help="requested capture fps (default: %(default)s)")
     parser.add_argument(
+        "--uvc-fps",
+        type=int,
+        default=None,
+        help="fps requested from UVC cameras only (default: --fps). The Decxin delivers ~20 fps when asked for 30 "
+        "at 1280x1024 but ~36 fps when asked for 60, while the D405 has no 60 fps profile at 1280x720.",
+    )
+    parser.add_argument(
         "--zed-resolution",
         default=None,
         choices=["VGA", "HD720", "HD1080", "HD2K", "SVGA", "HD1200", "AUTO"],
@@ -1097,6 +1108,9 @@ def main() -> None:
     )
     if args.uvc_view:
         specs = expand_uvc_views(specs, args.uvc_view)
+    if args.uvc_fps is not None:
+        # Both the native tile and its emulated-mode tiles share one SharedUvcSource, so they must agree.
+        specs = [replace(s, fps=args.uvc_fps) if s.kind in ("uvc", "uvc-mode") else s for s in specs]
     if not specs:
         raise SystemExit(
             "No cameras found. Check `lsusb`, and that this user can read /dev/video* "
@@ -1110,7 +1124,8 @@ def main() -> None:
     }
 
     res_txt = "native" if args.resolution is None else f"{args.resolution[0]}x{args.resolution[1]}"
-    print(f"\nDiscovered {len(specs)} camera tile(s) (capture: {res_txt}):")
+    fps_txt = f"{args.fps} fps" + (f", UVC {args.uvc_fps} fps" if args.uvc_fps is not None else "")
+    print(f"\nDiscovered {len(specs)} camera tile(s) (capture: {res_txt}, {fps_txt}):")
     for spec in specs:
         mode = spec.extra.get("mode", "")
         print(f"  - {spec.label:<28} [{spec.kind}] {spec.detail} {mode}")
