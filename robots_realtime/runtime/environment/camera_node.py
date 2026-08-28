@@ -20,6 +20,21 @@ deployment-only knob: it simulates a narrower-FOV camera so the policy input
 matches the FOV the model was trained on, without touching the optics. Like
 ``publish_resize`` it only affects the bus payload — the on-disk recording
 keeps the full FOV — so it composes with either resize mode.
+
+Optional ``publish_crop_rect`` (``[x0, y0, w, h]`` in native sensor pixels)
+crops the bus frame to an explicit rectangle before ``publish_fov_crop`` and
+``publish_resize``. Use this when training data was cropped with an off-center
+window (e.g. the Siemens ZED-top crop, which is bottom-anchored and shifted
+right of the principal point) that a symmetric fov-crop cannot reproduce. The
+rect is resolution-dependent — it must be computed against the same sensor
+mode the training data was recorded in.
+
+Optional ``publish_image_key`` renames the (single) image on the bus payload.
+Drivers name their images differently (ZED mono → ``left_rgb``, RealSense →
+``rgb``); agents flatten to ``<obs_key>-images-<img_key>``, and policies match
+those flattened names exactly — a ZED published as ``left_rgb`` silently
+misses a policy expecting ``top_camera-images-rgb``. Bus payload only; the
+recording keeps the driver's native key.
 """
 
 from __future__ import annotations
@@ -42,7 +57,20 @@ _CAMERA_DRIVER_REGISTRY: dict[str, str] = {
 _NODE_ONLY_KEYS = {
     "name", "type", "poll_freq",
     "publish_resize", "publish_resize_mode", "publish_fov_crop",
+    "publish_crop_rect", "publish_image_key",
 }
+
+
+def _rect_crop(img: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarray:
+    """Crop to an explicit pixel rect ``(x0, y0, w, h)`` in native sensor coordinates."""
+    x0, y0, w, h = rect
+    ih, iw = img.shape[:2]
+    if x0 + w > iw or y0 + h > ih:
+        raise ValueError(
+            f"publish_crop_rect {(x0, y0, w, h)} exceeds frame {iw}x{ih} — the rect is "
+            "defined in native sensor pixels; check the camera's resolution setting."
+        )
+    return img[y0:y0 + h, x0:x0 + w]
 
 
 def _center_fov_crop(img: np.ndarray, frac: float) -> np.ndarray:
@@ -140,6 +168,8 @@ class CameraNode(Node):
         publish_resize: tuple[int, int] | list[int] | None = None,
         publish_resize_mode: str = "center_crop",
         publish_fov_crop: float = 1.0,
+        publish_crop_rect: tuple[int, int, int, int] | list[int] | None = None,
+        publish_image_key: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(name=name, writer=writer, **kwargs)
@@ -152,6 +182,21 @@ class CameraNode(Node):
                 f"[{name}] publish_fov_crop must be in (0, 1], got {publish_fov_crop!r}"
             )
         self._publish_fov_crop = float(publish_fov_crop)
+
+        if publish_crop_rect is not None:
+            if len(publish_crop_rect) != 4 or any(int(v) != v or v < 0 for v in publish_crop_rect):
+                raise ValueError(
+                    f"[{name}] publish_crop_rect must be [x0, y0, w, h] of non-negative ints, "
+                    f"got {publish_crop_rect!r}"
+                )
+            x0, y0, w, h = (int(v) for v in publish_crop_rect)
+            if w == 0 or h == 0:
+                raise ValueError(f"[{name}] publish_crop_rect w/h must be positive, got {publish_crop_rect!r}")
+            self._publish_crop_rect: tuple[int, int, int, int] | None = (x0, y0, w, h)
+        else:
+            self._publish_crop_rect = None
+
+        self._publish_image_key = publish_image_key
 
         if publish_resize is not None:
             if publish_resize_mode not in _RESIZE_MODES:
@@ -199,15 +244,22 @@ class CameraNode(Node):
             msg["extrinsics"] = extrinsics
 
         fov_crop = self._publish_fov_crop
-        if self._publish_resize is None and fov_crop >= 1.0:
+        if (
+            self._publish_resize is None
+            and fov_crop >= 1.0
+            and self._publish_crop_rect is None
+            and self._publish_image_key is None
+        ):
             self.publish("rgb", msg, ts=ts)
         else:
-            # Bus payload: optionally FOV-cropped then resized RGB only — depth
+            # Bus payload: optionally rect/FOV-cropped then resized RGB only — depth
             # and intrinsics would need geometric rescaling to stay consistent
             # with the new pixel grid, so they're dropped from the bus version.
             # The disk recording (record_data=msg) keeps everything at full
             # resolution and full FOV.
             def _to_bus(img: np.ndarray) -> np.ndarray:
+                if self._publish_crop_rect is not None:
+                    img = _rect_crop(img, self._publish_crop_rect)
                 if fov_crop < 1.0:
                     img = _center_fov_crop(img, fov_crop)
                 if self._publish_resize is not None:
@@ -215,8 +267,17 @@ class CameraNode(Node):
                     img = self._publish_resize_fn(img, target_h, target_w)
                 return img
 
+            bus_images = {k: _to_bus(img) for k, img in data.images.items()}
+            if self._publish_image_key is not None:
+                if len(bus_images) != 1:
+                    raise ValueError(
+                        f"[{self.name}] publish_image_key requires the driver to publish exactly "
+                        f"one image, got keys {sorted(bus_images)}"
+                    )
+                bus_images = {self._publish_image_key: next(iter(bus_images.values()))}
+
             bus_msg: dict = {
-                "images": {k: _to_bus(img) for k, img in data.images.items()},
+                "images": bus_images,
                 "timestamp": ts,
             }
             if extrinsics is not None:
