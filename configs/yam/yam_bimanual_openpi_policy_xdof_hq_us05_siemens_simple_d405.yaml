@@ -58,7 +58,8 @@ nodes:
     cmd_topic: openpi_policy/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
-    startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
+    # startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
+    startup_joint_pos: [0.018, 1.519, 0.249, 1.167, -0.170, -0.096, 1.0]
     startup_duration_s: 2.0
 
   - type: RobotNode
@@ -67,7 +68,8 @@ nodes:
     cmd_topic: openpi_policy/right_pos
     poll_freq: 200
     ramp_duration_s: 1.5
-    startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
+    # startup_joint_pos: [0.0, 0.6, 0.55, 0.35, 0.0, 0.0, 1.0]
+    startup_joint_pos: [0.047, 1.497, 0.238, 1.157, 0.171, 0.031, 1.0]
     startup_duration_s: 2.0
 
   # Current us05 D405 mapping from the generic us05 config. Confirm the
@@ -85,7 +87,7 @@ nodes:
   - type: CameraNode
     name: camera_left
     driver: RealSenseCamera
-    device_id: "218622275506"
+    device_id: "427622273554"
     resolution: VGA
     fps: 30
     publish_resize: [224, 224]
@@ -95,7 +97,7 @@ nodes:
   - type: CameraNode
     name: camera_right
     driver: RealSenseCamera
-    device_id: "218722271050"
+    device_id: "427622271411"
     resolution: VGA
     fps: 30
     publish_resize: [224, 224]

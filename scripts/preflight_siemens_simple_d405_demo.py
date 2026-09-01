@@ -18,8 +18,8 @@ DEFAULT_CHECKPOINT = Path(
 )
 EXPECTED_CAMERAS = {
     "camera_top": "427622273494",
-    "camera_left": "218622275506",
-    "camera_right": "218722271050",
+    "camera_left": "427622273554",
+    "camera_right": "427622271411",
 }
 
 
