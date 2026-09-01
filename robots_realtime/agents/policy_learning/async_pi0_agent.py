@@ -72,12 +72,36 @@ _ASYNC_MODES = ("async", "async_rate_limited", "async_rtc")
 ImagePreprocess = Literal["center_crop", "pad"]
 
 
+def _flip_bimanual_yam_joint_order(values: np.ndarray) -> np.ndarray:
+    """Reverse each arm's six joints while preserving its gripper position.
+
+    The Siemens LeRobot converter stores 14-D YAM state/actions as
+    ``flip(left_joints), left_gripper, flip(right_joints), right_gripper``.
+    robots_realtime publishes and commands the unflipped motor order. This
+    transform is its own inverse, so it is used on observations before
+    inference and on policy actions before execution.
+    """
+    values = np.asarray(values)
+    if values.shape[-1] != 14:
+        raise ValueError(f"Expected a 14-D bimanual YAM vector, got shape {values.shape}")
+    return np.concatenate(
+        (
+            values[..., 5::-1],
+            values[..., 6:7],
+            values[..., 12:6:-1],
+            values[..., 13:14],
+        ),
+        axis=-1,
+    )
+
+
 def _center_crop_and_resize(img: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
     """Center-crop to the largest square that fits, then resize to (target_h, target_w).
 
-    Must match the training augmentation for the deployed checkpoint.
-    OpenPI bimanual YAM runs use center-crop; choose the matching
-    strategy per-model via ``AsyncDiffusionAgent(image_preprocess=...)``.
+    Must match the training augmentation for the deployed checkpoint. Some
+    OpenPI bimanual YAM runs use center-crop, while the Siemens simple-D405
+    run uses resize-with-pad; choose the matching strategy per model via
+    ``AsyncDiffusionAgent(image_preprocess=...)``.
 
     Strategy: `min(H, W)`-sized square centered on (H/2, W/2), scaled to the
     target. Discards peripheral FOV instead of showing black bars to the model.
@@ -216,12 +240,20 @@ class AsyncDiffusionAgent(PolicyAgent):
         temporal_ensemble_k: float = 0.01,
         # MUST match the training-time image augmentation for your checkpoint.
         #   "center_crop": crop to a min(H,W)-sized square from the centre,
-        #                  then resize. Discards peripheral FOV. PI
-        #                  YAM checkpoints use this.
-        #   "pad":         preserve full FOV, letterbox with black bars.
+        #                  then resize. Discards peripheral FOV. Used by some
+        #                  legacy YAM checkpoints.
+        #   "pad":         preserve full FOV, letterbox with black bars. Used
+        #                  by the Siemens simple-D405 checkpoint.
         # Mismatch = the model sees out-of-distribution inputs (black bars
         # or wrong FOV) and can produce unsafe actions.
         image_preprocess: ImagePreprocess = "center_crop",
+        # Task prompt sent with every inference request. Overrides the server's
+        # default when set; ``None`` keeps the server-default behavior.
+        prompt: str | None = None,
+        # Siemens LeRobot checkpoints reverse the six arm joints during dataset
+        # conversion. Enable this to map live motor-order observations into the
+        # training convention and map predicted actions back before execution.
+        flip_joint_order: bool = False,
     ) -> None:
         # Validate config first — user-error (bad mode) should surface before
         # env-error (missing openpi_client).
@@ -235,6 +267,9 @@ class AsyncDiffusionAgent(PolicyAgent):
                 f"image_preprocess must be 'center_crop' or 'pad'; got {image_preprocess!r}"
             )
         self._image_preprocess: ImagePreprocess = image_preprocess
+        if flip_joint_order and use_joint_state_as_action:
+            raise ValueError("flip_joint_order currently supports only 14-D position actions")
+        self._flip_joint_order = bool(flip_joint_order)
         if inference_mode == "async_rate_limited" and (inference_interval_s is None or inference_interval_s <= 0):
             raise ValueError("inference_mode='async_rate_limited' requires inference_interval_s > 0")
         if min_smoothed_actions < 0 or max_smoothed_actions < 0:
@@ -258,6 +293,7 @@ class AsyncDiffusionAgent(PolicyAgent):
             ) from exc
 
         self._image_tools = image_tools
+        self._prompt = prompt
 
         # Last preprocessed images in HWC uint8 form (pre-transpose) — exposed
         # to consumers via ``act()["_images"]`` so a monitor can display exactly
@@ -357,6 +393,8 @@ class AsyncDiffusionAgent(PolicyAgent):
             "rtc_enabled": self._rtc_enabled,
             "rtc_execution_horizon": self._rtc_execution_horizon,
             "temporal_ensemble_k": self._te_k,
+            "prompt": self._prompt,
+            "flip_joint_order": self._flip_joint_order,
             **self._websocket_client_policy.get_server_metadata(),
         }
 
@@ -410,6 +448,8 @@ class AsyncDiffusionAgent(PolicyAgent):
 
         flat_state = [np.asarray(flat[k]).reshape(-1) for k in self.config.mlp_keys]
         state = np.concatenate(flat_state, axis=-1)
+        if self._flip_joint_order:
+            state = _flip_bimanual_yam_joint_order(state)
 
         images: Dict[str, Any] = {}
         display_images: Dict[str, np.ndarray] = {}
@@ -427,7 +467,10 @@ class AsyncDiffusionAgent(PolicyAgent):
             images[k] = np.transpose(img, (2, 0, 1))
         self._last_display_images = display_images
 
-        return {"state": state, **images}
+        model_input = {"state": state, **images}
+        if self._prompt is not None:
+            model_input["prompt"] = self._prompt
+        return model_input
 
     # ------------------------------------------------------------------ #
     # Public act() — called by AgentNode.step() at consumer rate
@@ -445,6 +488,8 @@ class AsyncDiffusionAgent(PolicyAgent):
         # (over the websocket) come back as read-only views, and the clip
         # steps below mutate in place.
         a = np.array(raw, dtype=np.float32, copy=True)
+        if self._flip_joint_order:
+            a = _flip_bimanual_yam_joint_order(a)
         if self.use_joint_state_as_action:
             assert a.shape == (28,), a.shape
             left = a[:14]
@@ -514,6 +559,8 @@ class AsyncDiffusionAgent(PolicyAgent):
         # We only publish the pos-flavoured split here; the velocity flavour (28,)
         # case is rarely used and the visualizer doesn't need vel anyway.
         if remaining.shape[1] == 14:
+            if self._flip_joint_order:
+                remaining = _flip_bimanual_yam_joint_order(remaining)
             return {
                 "left":  np.ascontiguousarray(remaining[:, :7], dtype=np.float32),
                 "right": np.ascontiguousarray(remaining[:, 7:], dtype=np.float32),
