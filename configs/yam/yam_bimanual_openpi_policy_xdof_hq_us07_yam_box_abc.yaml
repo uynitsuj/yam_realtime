@@ -85,7 +85,7 @@ nodes:
     agent_kwargs:
       ip: 127.0.0.1
       port: 8012
-      action_horizon: 20
+      action_horizon: 15
       inference_mode: sync                 # sync | async | async_rate_limited | async_rtc | temporal_ensemble
       # inference_interval_s: 0.7                 # rate cap in seconds (None = flat-out async)
       # min_smoothed_actions: 1                 # only meaningful for async / async_rate_limited
