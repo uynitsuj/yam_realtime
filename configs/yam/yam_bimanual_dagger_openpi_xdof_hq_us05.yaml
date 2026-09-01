@@ -1,5 +1,60 @@
 version: "1"
 
+# DAgger intervention data collection: bimanual YAM policy rollout that the
+# operator can take over mid-episode with the two passive GELLO leaders, correct
+# by hand, and hand back — repeatedly, inside one recorded episode.
+#
+# Derived from yam_bimanual_openpi_policy_xdof_hq_us05.yaml. The differences are
+# all in the command path: the policy no longer drives the arms directly.
+#
+#   openpi_policy/{left,right}_pos ─┐
+#   passive gello CAN ──────────────┤→ dagger ─→ dagger/{left,right}_pos ─→ RobotNode
+#   yam_{left,right}/joint_state ───┘             dagger/control_mode  (recorded label)
+#
+# The policy keeps publishing its own commands throughout, so during intervention
+# openpi_policy/{arm}_pos is recorded as the counterfactual "what the policy
+# would have done" — the target signal for DAgger training.
+#
+# Operator flow — both buttons are on the passive gellos, so a whole collection
+# session runs without going back to the keyboard. Either leader's buttons act on
+# both arms.
+#   1. Set up the scene while the arms are still gated.
+#   2. [space] in the TUI arms the robots: the policy takes the arms AND the
+#      episode starts, so the rollout is captured from the instant of handoff.
+#   3. YELLOW button (top, index 0) intervenes. The correction is a RELATIVE SE(3)
+#      offset anchored at the press, so the followers do not snap to wherever the
+#      leaders happen to be sitting. Press again to hand back — the policy's
+#      stale action chunk is flushed and the command blended over
+#      handback_blend_s. Toggle as often as needed within the episode.
+#   4. WHITE button (lower, index 1) ends the episode, saves it, and walks the
+#      arms back to home_joint_pos, where they park. Reset the scene in that
+#      window, then press WHITE again to start the next rollout. After step 2 the
+#      keyboard is not needed again.
+#
+#   Rollout cycle:
+#     IDLE ──white──> POLICY <──yellow──> INTERVENTION
+#     (parked            │                     │
+#      at home)          │                  (yellow)
+#         ^              │                     v
+#         └──HOMING──white┘                HANDBACK ──> POLICY
+#
+#   [space] still works as a hard gate at any point: pausing ends the episode and
+#   holds the arms where they are (RobotNode commands are gated, so they cannot
+#   be driven home while paused); unpausing starts a fresh episode and blends the
+#   arms back under policy control.
+#
+#   Button map (see dagger_intervention_agent.py for how the bits are decoded):
+#     index 0 = digital_inputs bit 0 = TOP    = YELLOW = takeover / hand back
+#     index 1 = digital_inputs bit 1 = LOWER  = WHITE  = episode start / end+save
+# The TUI still works throughout: [r] toggles recording, [d] discards the current
+# episode, [space] re-pauses, [q] quits.
+#
+# Prereqs beyond the plain policy config:
+#   - can_lead_l / can_lead_r up at 1 Mbit/s (xdof/scripts/reset_all_can.sh)
+#   - all 7 encoder devices per leader powered and streaming 0x50F
+#   - button indices confirmed with: uv run scripts/probe_gello_buttons.py
+#     (prints the live byte with both indices labelled by position and colour)
+#
 # Bimanual YAM policy deployment via an external OpenPI websocket inference server.
 # The policy agent runs inference on a background thread (inference_mode: async = flat-out);
 # AgentNode's consumer calls act() at poll_freq and dequeues one action per tick from the
@@ -16,15 +71,29 @@ session:
   # reports the served checkpoint's name — the named-checkpoint key, or
   # <config>/<run>/<step> for a raw ckpt — so each policy's rollouts land in
   # their own folder. Falls back to the literal template if the server is down.
-  save_root: recordings/{policy_name}
-  # Policy-specific safety + ergonomics:
-  #   - start_paused: RobotNode commands are gated on startup so the arm doesn't
-  #     snap to wherever the policy thinks it should be. Hit [space] in the TUI
-  #     to hand off control.
-  #   - record_on_unpause: when the operator unpauses, automatically start an
-  #     episode so every rollout is captured from the instant of handoff.
+  save_root: recordings/dagger/{policy_name}
+  # start_paused: RobotNode commands are gated on startup so the arms don't snap
+  # to wherever the policy thinks they should be. Set up the scene while gated,
+  # then hit [space] to hand the arms to the policy.
   start_paused: true
-  record_on_unpause: true
+  # Session's own record_on_unpause MUST stay false — the dagger node replaces
+  # it (its own record_on_unpause kwarg, on by default) so that ONE thing owns
+  # episode boundaries. Session's version calls start_episode() directly without
+  # advancing its _prev_record_signal, which desyncs the latch below and gets the
+  # operator's next button press silently swallowed.
+  record_on_unpause: false
+  # Every episode boundary arrives on this topic from the dagger node, which
+  # holds a latched boolean that Session edge-detects (False→True starts an
+  # episode, True→False ends and saves it):
+  #   [space] unpause  → episode starts   (unpausing IS the handoff — the policy
+  #                                        begins driving, so recording has to
+  #                                        start here or the rollout loses its head)
+  #   [space] pause    → episode ends + saves
+  #   WHITE button     → toggle an episode without touching pause
+  record_topic: dagger/record
+  # Backstop only. On expiry Session ends the episode and re-pauses; the dagger
+  # node sees that pause edge and drops its latch to match, so the next [space]
+  # cleanly starts a fresh episode with no stray press needed.
   episode_timeout: 240
 
 nodes:
@@ -111,11 +180,98 @@ nodes:
     loop_mode: fixed_rate
     poll_freq: 30
     # No arm_key: action dict has "left"/"right" → fans out to openpi_policy/left_pos and /right_pos.
+    # These are no longer wired straight to the arms — the dagger node arbitrates.
+    #
+    # On handback the arbiter publishes dagger/policy_reset once, which makes
+    # AgentNode call AsyncDiffusionAgent.reset() → drops last_actions and resets
+    # the ActionChunkBroker. Without it the first post-handback chunk was
+    # inferred from an observation taken before the operator intervened.
+    reset_topic: dagger/policy_reset
+
+  # ── DAgger arbiter ────────────────────────────────────────────────────────
+  # Owns both passive GELLO leaders (CAN), the mode FSM, and the follower IK.
+  # Reads the policy's commands off the bus rather than running inference.
+  - type: AgentNode
+    name: dagger
+    agent_class: robots_realtime.agents.teleoperation.dagger_intervention_agent:DaggerInterventionAgent
+    agent_kwargs:
+      left_channel: can_lead_l
+      right_channel: can_lead_r
+      # Must match the passive-gello teleop config for this station.
+      joint_signs: [-1, -1, 1, 1, -1, -1]
+      include_gripper: true
+      # YELLOW, the top button. Takeover gets the yellow one because it's the
+      # action used most within a rollout and a mispress is cheap — press again
+      # to hand back. Swap the two indices if the ergonomics feel wrong.
+      takeover_button_index: 0    # bit 0 = top = yellow
+      # WHITE, the lower button ("grip" in i2rt's naming): press to start the
+      # episode, press again to end and save it. Must differ from
+      # takeover_button_index — the gello only has two switches. Set to null to
+      # disable and drive recording from the TUI only.
+      episode_button_index: 1     # bit 1 = lower = white
+      # Start an episode on unpause and end it on pause. This replaces Session's
+      # own record_on_unpause (which must stay false above) so that exactly one
+      # thing owns episode boundaries.
+      record_on_unpause: true
+      # ── Rollout cycle ──────────────────────────────────────────────────────
+      # Ending a rollout walks the arms back here and parks them, so you get a
+      # safe unrecorded window to reset the scene without the policy flailing at
+      # it. Press white again to start the next episode.
+      #
+      # MUST match the RobotNodes' startup_joint_pos below — the agent has no way
+      # to read that off them, so the pose is unfortunately stated twice. If you
+      # change one, change the other.
+      home_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
+      home_on_episode_end: true
+      # Gentler than max_joint_speed: this motion runs unattended while the
+      # operator is looking at the scene rather than the arms.
+      homing_max_joint_speed: 1.0
+      home_tol_rad: 0.03
+      # Handback: hold the operator's pose until a post-flush policy command
+      # lands, then blend to it over this long. Raise if handback feels abrupt.
+      handback_blend_s: 1.0
+      handback_fresh_timeout_s: 1.5
+      # Slew/smoothing, same scheme as YamPyrokiViserAgent. Treat max_joint_speed
+      # as a GLITCH guard, not a comfort knob — it bounds one tick's motion if a
+      # leader encoder reports garbage, and setting it low does not make teleop
+      # feel safer, it makes it feel broken. Measured tracking gain at a 1.5 rad/s
+      # hand speed: 0.83 at 2.0 (reads as "the scale is wrong"), 0.98 at 3.0,
+      # 0.99 at 6.0. The URDF joint velocity limit is 10 rad/s, so 6.0 keeps
+      # headroom while capping a single 100 Hz tick at 60 mrad.
+      max_joint_speed: 6.0
+      max_gripper_speed: 4.0
+      smoothing_tau_s: 0.01
+      # Pull toward the previous solution so the IK stays on one branch
+      # (elbow-up vs elbow-down flips would show up as lunges).
+      ik_seed_weight: 0.5
+      # QUALITY threshold: a solve missing by more than this flags ik_ok: false in
+      # dagger/control_mode so the stretch can be filtered in post, but the arm
+      # keeps tracking the closest reachable pose. It has to — the target goes
+      # unreachable the moment the operator pushes past a joint limit, and
+      # freezing the arm there reads as the rig being broken.
+      ik_pos_tol_m: 0.02
+      ik_ori_tol_rad: 0.2
+      # SANITY threshold, much larger: this far off is a solver blow-up rather
+      # than a workspace edge, so hold the last accepted solution instead.
+      ik_reject_pos_m: 0.15
+      # Leader considered dead after this long with no CAN frame. While
+      # intervening we then HOLD rather than hand back — silently re-arming the
+      # policy mid-correction is the worse failure.
+      gello_stale_s: 0.5
+    state_topics:
+      left:         yam_left/joint_state
+      right:        yam_right/joint_state
+      policy_left:  openpi_policy/left_pos
+      policy_right: openpi_policy/right_pos
+    loop_mode: fixed_rate
+    # IK measures ~0.2 ms/solve on CPU, so 2 arms at 100 Hz is ~4% of the budget.
+    # RobotNode still polls at 200 Hz and re-commands the latest value.
+    poll_freq: 100
 
   - type: RobotNode
     name: yam_left
     robot_config: robot_configs/yam/xdof_hq/left.yaml
-    cmd_topic: openpi_policy/left_pos
+    cmd_topic: dagger/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [-0.0235, 1.36242, 0.3495, 0.95763, -0.11537, -0.02913, 1.0]
@@ -125,15 +281,29 @@ nodes:
   - type: RobotNode
     name: yam_right
     robot_config: robot_configs/yam/xdof_hq/right.yaml
-    cmd_topic: openpi_policy/right_pos
+    cmd_topic: dagger/right_pos
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [0.01732, 1.34234, 0.33567, 0.98454, 0.11514, 0.03717, 1.0]
     startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
-  # Three Intel RealSense D405s — same station as the teleop config.
-  # Swap the device_id values if the physical mounts don't match the labels.
+  # Three Intel RealSense D405s. Serials track the sibling policy config
+  # (yam_bimanual_openpi_policy_xdof_hq_us05.yaml) — keep them in sync so a
+  # DAgger session and a clean eval see identical inputs.
+  #
+  # Note the wrist units were swapped at some point: `rs-enumerate-devices -s`
+  # on 2026-08-21 shows 427622273494 (top, unchanged) plus 218722271050 and
+  # 218622275506, where this station's configs previously named 427622274156 /
+  # 427622272101. The USB tree moved too (2-9.1.x → 2-2.x), i.e. re-plugged.
+  #
+  # Consequence worth keeping in mind: the checkpoint was trained with the
+  # previous units at their previous mounts, so even with correct left/right
+  # labels there is a distribution shift here. That is part of what these
+  # corrections are for. A *crossed* left/right pair would not crash — it would
+  # silently feed the policy mirrored wrist views, which reads as a bad policy
+  # rather than a bad config, so it's worth a glance at the viser monitor's
+  # left/right panels before hitting [space].
   #
   # publish_resize shrinks the bus payload to the policy's input size
   # (224×224) so VGA frames don't get serialized + shipped over ZMQ at
@@ -157,7 +327,7 @@ nodes:
     fps: 30
     publish_resize: [224, 224]
     publish_resize_mode: center_crop
-    publish_fov_crop: 1.0
+    publish_fov_crop: 0.88
 
   - type: CameraNode
     name: camera_left

@@ -5,12 +5,32 @@ version: "1"
 # AgentNode's consumer calls act() at poll_freq and dequeues one action per tick from the
 # chunk buffer. Smoothing across chunk boundaries is handled inside the agent.
 #
+# Deployment counterpart of yam_bimanual_viser_teleop_xdof_hq_us05_yam_box_abc.yaml
+# — same station, same hardware IDs, so a checkpoint trained on data collected
+# with that teleop config sees the same cameras in the same roles.
+#
+# Hardware (us05, surveyed 2026-08-20):
+#   CAN — two CANable 2.5 adapters, named by USB serial:
+#     208237984546500A -> can_left   (left  follower)
+#     207B34A158455017 -> can_right  (right follower)
+#   Bring them up with ./scripts/setup_can_yam_bimanual_us05.sh (kernel names
+#   are enumeration-order dependent; the script pins them by serial).
+#   Cameras — three Intel RealSense D405s:
+#     427622273855  top    (overhead)
+#     427622271411  left   (left  arm wrist)
+#     427622273554  right  (right arm wrist)
+#
 # Prereqs:
 #   - `openpi_client` installed in this venv.
 #   - OpenPI server reachable at the (ip, port) below.
-#   - can_left / can_right interfaces up at 1 Mbit/s.
+#   - can_left / can_right up at 1 Mbit/s (see the script above).
 
 session:
+  # {policy_name} is resolved at startup by querying the OpenPI server's
+  # websocket metadata (runtime/config.py:_resolve_policy_name). serve_policy.py
+  # reports the served checkpoint's name — the named-checkpoint key, or
+  # <config>/<run>/<step> for a raw ckpt — so each policy's rollouts land in
+  # their own folder. Falls back to the literal template if the server is down.
   save_root: recordings/{policy_name}
   # Policy-specific safety + ergonomics:
   #   - start_paused: RobotNode commands are gated on startup so the arm doesn't
@@ -70,8 +90,8 @@ nodes:
       # inference_interval_s: 0.7                 # rate cap in seconds (None = flat-out async)
       # min_smoothed_actions: 1                 # only meaningful for async / async_rate_limited
       # max_smoothed_actions: 10                # (ignored in sync and effectively unused in async_rtc)
-      # temporal_ensemble_k: 0.15               # ACT paper default; higher = more weight on older predictions (smoother, laggier)
-      # rtc_execution_horizon: 26               # async_rtc only; None → server's action_horizon
+      # temporal_ensemble_k: 0.05               # ACT paper default; higher = more weight on older predictions (smoother, laggier)
+      # rtc_execution_horizon: 22               # async_rtc only; None → server's action_horizon
       # rtc_consumer_rate_hz: 30                  # async_rtc only; converts latency → inference_delay ticks
       # Upper clamp on RTC guidance weight (server side). With the prefix now
       # normalized into model-space by Policy._rtc_action_normalizer, a
@@ -79,7 +99,7 @@ nodes:
       # the base v_t while still tracking the prefix. If the arm is still
       # jerky, drop to 0.5. If the [rtc] log shows |corr| << |v_t| and
       # chunk-boundary jitter persists, raise to 3–5.
-      # rtc_max_guidance_weight: 3.0
+      # rtc_max_guidance_weight: 4.0
       # rtc_debug controls the CLIENT-side chunk-jump log. Server-side per-
       # denoising-step stats are controlled independently by the RTC_DEBUG
       # env var on the server process (those prints add real latency via
@@ -91,10 +111,10 @@ nodes:
       # once more on the first RTC inference, then nothing for subsequent ones.
       # rtc_debug: true
       # Image pre-processing MUST match the training augmentation for your
-      # checkpoint. PI OpenPI YAM runs use center-crop (crop to a
+      # checkpoint. Lab42 / PI OpenPI YAM runs use center-crop (crop to a
       # min(H,W) square from centre, then resize). resize_with_pad adds
       # black bars which are OOD for the model → erratic actions.
-      image_preprocess: center_crop #center_crop             # center_crop | pad
+      image_preprocess: center_crop             # center_crop | pad
       use_joint_state_as_action: false
     state_topics:
       left:  yam_left/joint_state       # flatten → left-joint_pos, left-gripper_pos
@@ -109,26 +129,32 @@ nodes:
 
   - type: RobotNode
     name: yam_left
-    robot_config: robot_configs/yam/left.yaml
+    robot_config: robot_configs/yam/xdof_hq/left.yaml
     cmd_topic: openpi_policy/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [-0.0235, 1.36242, 0.3495, 0.95763, -0.11537, -0.02913, 1.0]
-    startup_joint_pos: [0.0, 0.0, 0.0, 0.4, 0.0, 0.0, 1.0]
+    startup_joint_pos: [0.0, 0.4 , 0.35, 0.35, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
   - type: RobotNode
     name: yam_right
-    robot_config: robot_configs/yam/right.yaml
+    robot_config: robot_configs/yam/xdof_hq/right.yaml
     cmd_topic: openpi_policy/right_pos
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [0.01732, 1.34234, 0.33567, 0.98454, 0.11514, 0.03717, 1.0]
-    startup_joint_pos: [0.0, 0.0, 0.0, 0.4, 0.0, 0.0, 1.0]
+    startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
-  # Three Intel RealSense D405s — same station as the teleop config.
+  # Three Intel RealSense D405s — same serials, same roles as
+  # yam_bimanual_viser_teleop_xdof_hq_us05_yam_box_abc.yaml.
   # Swap the device_id values if the physical mounts don't match the labels.
+  #
+  # NOTE: publish_fov_crop below is 0.88 on the top camera, while the box_abc
+  # teleop config records at 0.92. Deployment must match whatever produced the
+  # training data for this checkpoint — set both to the same value once you
+  # know which one the episodes were collected with.
   #
   # publish_resize shrinks the bus payload to the policy's input size
   # (224×224) so VGA frames don't get serialized + shipped over ZMQ at
@@ -136,32 +162,43 @@ nodes:
   # only the bus copy is downsized. Mode MUST match the agent's
   # image_preprocess setting above so what hits the policy matches the
   # training augmentation.
+  #
+  # publish_fov_crop (fraction in (0, 1], default 1.0 = off) artificially
+  # narrows the FOV by center-cropping BEFORE the resize — a deployment knob
+  # to match the policy input to the FOV the model was trained on without
+  # changing optics. 0.85 keeps the central 85% of each axis (~15% tighter
+  # FOV / slight zoom-in); applied to the bus/policy frame only — the on-disk
+  # recording stays full FOV. Keep it identical across all 3 cams unless you
+  # deliberately want them mismatched.
   - type: CameraNode
     name: camera_top
     driver: RealSenseCamera
-    device_id: "230322272858"
+    device_id: "427622273855"
     resolution: VGA
     fps: 30
     publish_resize: [224, 224]
     publish_resize_mode: center_crop
+    publish_fov_crop: 0.88
 
   - type: CameraNode
     name: camera_left
     driver: RealSenseCamera
-    device_id: "218622270923"
+    device_id: "427622271411"
     resolution: VGA
     fps: 30
     publish_resize: [224, 224]
     publish_resize_mode: center_crop
+    publish_fov_crop: 1.0
 
   - type: CameraNode
     name: camera_right
     driver: RealSenseCamera
-    device_id: "218622273065"
+    device_id: "427622273554"
     resolution: VGA
     fps: 30
     publish_resize: [224, 224]
     publish_resize_mode: center_crop
+    publish_fov_crop: 1.0
 
   # Live viser monitor — URDF overlays + camera panels, no commands.
   - type: ViserMonitorNode

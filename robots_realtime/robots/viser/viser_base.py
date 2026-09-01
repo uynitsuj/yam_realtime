@@ -63,23 +63,8 @@ class ViserAbstractBase(ABC):
         self.bimanual = bimanual
         self.coordinate_frame = coordinate_frame
 
-        if robot_description == "yam_description":  # temporary fix for yam_description
-            # current path
-            current_path = os.path.dirname(os.path.abspath(__file__))
-            urdf_path = os.path.join(
-                current_path, "..", "..", "..", "dependencies", "i2rt", "i2rt", "robot_models", "yam", "yam.urdf"
-            )
-            mesh_dir = os.path.join(
-                current_path, "..", "..", "..", "dependencies", "i2rt", "i2rt", "robot_models", "yam", "assets"
-            )
-            self.urdf = yourdfpy.URDF.load(
-                urdf_path,
-                mesh_dir=mesh_dir,
-            )
-        else:
-            self.urdf = set_min_distance_from_limits(
-                load_urdf_robot_description(robot_description), min_distance_from_limits=0.25
-            )
+        self.robot_description = robot_description
+        self.urdf = self.load_urdf()
 
         self.viser_server = viser_server if viser_server is not None else viser.ViserServer()
 
@@ -92,6 +77,26 @@ class ViserAbstractBase(ABC):
         self._setup_visualization()
         self._setup_gui()
         self._setup_transform_handles()
+
+    def load_urdf(self) -> yourdfpy.URDF:
+        """Return a *fresh* URDF instance for this robot description.
+
+        Every ViserUrdf overlay needs its own URDF object (they each mutate
+        their configuration independently). ``copy.deepcopy`` can't be used for
+        that — yourdfpy models hold unpicklable state — so re-load instead.
+        """
+        if self.robot_description == "yam_description":  # temporary fix for yam_description
+            current_path = os.path.dirname(os.path.abspath(__file__))
+            yam_dir = os.path.join(
+                current_path, "..", "..", "..", "dependencies", "i2rt", "i2rt", "robot_models", "arm", "yam"
+            )
+            return yourdfpy.URDF.load(
+                os.path.join(yam_dir, "yam.urdf"),
+                mesh_dir=os.path.join(yam_dir, "assets"),
+            )
+        return set_min_distance_from_limits(
+            load_urdf_robot_description(self.robot_description), min_distance_from_limits=0.25
+        )
 
     def _setup_visualization(self):
         """Setup basic visualization elements."""

@@ -17,6 +17,7 @@ overrides = [
     { name = "opencv-python-headless", marker = "python_full_version < '0'" },
     { name = "tyro", specifier = ">=1.0.1" },
 ]
+build-constraints = [{ name = "scikit-build-core", specifier = "<0.10" }]
 
 [[package]]
 name = "absl-py"

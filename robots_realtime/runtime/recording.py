@@ -1,4 +1,4 @@
-"""Writer abstractions for recording node data (aligned with market42/lab42 format).
+"""Writer abstractions for recording node data.
 
 Each node owns its writer; recording is started/stopped via start_recording() / stop_recording().
 

@@ -70,6 +70,11 @@ i2rt = { path = "dependencies/i2rt", editable = true }
 lerobot_teleoperator_yamactiveleader = { path = "dependencies/lerobot_teleoperator_yamactiveleader", editable = true }
 
 [tool.uv]
+# ruckig 0.15.3's build config uses the deprecated `cmake.targets` key, which
+# scikit-build-core >= 0.10 rejects; pin the build backend below that.
+build-constraint-dependencies = [
+    "scikit-build-core<0.10",
+]
 override-dependencies = [
     "numpy==1.26.4",
     # mjlab requires mujoco>=3.5.0 and tyro>=1.0.1; override i2rt's hard pins.

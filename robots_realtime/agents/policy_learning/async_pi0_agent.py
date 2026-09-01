@@ -76,7 +76,7 @@ def _center_crop_and_resize(img: np.ndarray, target_h: int, target_w: int) -> np
     """Center-crop to the largest square that fits, then resize to (target_h, target_w).
 
     Must match the training augmentation for the deployed checkpoint.
-    Lab42's OpenPI bimanual YAM runs use center-crop; choose the matching
+    OpenPI bimanual YAM runs use center-crop; choose the matching
     strategy per-model via ``AsyncDiffusionAgent(image_preprocess=...)``.
 
     Strategy: `min(H, W)`-sized square centered on (H/2, W/2), scaled to the
@@ -96,8 +96,7 @@ def _center_crop_and_resize(img: np.ndarray, target_h: int, target_w: int) -> np
 class ModelIOConfig:
     """What obs keys the policy server expects and what action keys it returns.
 
-    Defaults match the OpenPI bimanual YAM schema (lab42 passive-gello training
-    runs). Override via kwargs if your model was trained with different keys.
+    Defaults match the OpenPI bimanual YAM schema. Override via kwargs if your model was trained with different keys.
     """
 
     action_keys: Tuple[str, ...] = (
@@ -217,7 +216,7 @@ class AsyncDiffusionAgent(PolicyAgent):
         temporal_ensemble_k: float = 0.01,
         # MUST match the training-time image augmentation for your checkpoint.
         #   "center_crop": crop to a min(H,W)-sized square from the centre,
-        #                  then resize. Discards peripheral FOV. Lab42 / PI
+        #                  then resize. Discards peripheral FOV. PI
         #                  YAM checkpoints use this.
         #   "pad":         preserve full FOV, letterbox with black bars.
         # Mismatch = the model sees out-of-distribution inputs (black bars

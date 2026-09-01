@@ -17,13 +17,15 @@ Action format (returned by agent.act()):
                                              multiple keys → {key}_pos each
     arm_key set                            — extract action[arm_key]["pos"] → joint_pos
     "_record" key                          — forwarded as record signal
+    "_extras" key                          — {suffix: payload} published as {name}/{suffix}
 
 Published topics:
     ``{name}/joint_pos``     — single-arm command
     ``{name}/{key}_pos``     — per-arm commands (multi-arm policies)
     ``{name}/record``        — forwarded record signal
+    ``{name}/{suffix}``      — one per "_extras" entry (e.g. dagger/control_mode)
 
-Subscribed topics: state_topics.values() + image_topics.values()
+Subscribed topics: state_topics.values() + image_topics.values() + reset_topic
 """
 
 from __future__ import annotations
@@ -54,6 +56,12 @@ class AgentNode(Node):
         arm_key:         If set, extract action[arm_key]["pos"] and publish as joint_pos.
                          Useful for agents that always return a multi-arm dict but are
                          deployed per-arm (e.g. GelloLeaderAgent).
+        reset_topic:     Optional full bus topic carrying a boolean "reset" field. A
+                         rising edge calls agent.reset(). Lets one node ask another's
+                         agent to drop internal state — used by the DAgger arbiter to
+                         flush a policy's stale action chunk on handback, so the first
+                         post-handback chunk is inferred from a current observation
+                         rather than a pre-intervention one.
         normalize_gripper: If True, map the last element of pos from raw degrees to [0,1].
         gripper_open_deg:  Raw degrees corresponding to gripper fully open (1.0).
         gripper_closed_deg: Raw degrees corresponding to gripper fully closed (0.0).
@@ -75,6 +83,7 @@ class AgentNode(Node):
         state_topics: dict[str, str] | None = None,
         image_topics: dict[str, str] | None = None,
         arm_key: str | None = None,
+        reset_topic: str | None = None,
         normalize_gripper: bool = False,
         gripper_open_deg: float = 85.0,
         gripper_closed_deg: float = 5.0,
@@ -83,8 +92,11 @@ class AgentNode(Node):
     ) -> None:
         self._state_topics = state_topics or {}
         self._image_topics = image_topics or {}
+        self._reset_topic = reset_topic
         self.subscribed_topics = (
-            list(self._state_topics.values()) + list(self._image_topics.values())
+            list(self._state_topics.values())
+            + list(self._image_topics.values())
+            + ([reset_topic] if reset_topic else [])
         )
 
         if loop_mode == "subscriber_driven":
@@ -108,6 +120,9 @@ class AgentNode(Node):
         self._agent_class = agent_class
         self._agent_kwargs = agent_kwargs or {}
         self._arm_key = arm_key
+        # Timestamp of the last reset message consumed — edge detection, so a
+        # latched reset signal doesn't re-reset the agent on every tick.
+        self._last_reset_ts: float = 0.0
         self._normalize_gripper = normalize_gripper
         self._gripper_open_deg = gripper_open_deg
         self._gripper_closed_deg = gripper_closed_deg
@@ -135,15 +150,37 @@ class AgentNode(Node):
         return getattr(mod, cls_name)(**self._agent_kwargs)
 
     def step(self) -> None:
+        self._check_reset_signal()
+
         obs: dict = {"timestamp": time.time()}
+        # Publish timestamp of each input, keyed the same as the input itself.
+        # Agents that need to distinguish a *fresh* message from a stale one
+        # still sitting in the subscriber's latest-buffer read it from here
+        # (the DAgger arbiter uses it to detect the first policy command
+        # inferred after a handback flush). Consumers that don't care ignore it:
+        # the "_" prefix keeps it out of arm-key iteration, and policies select
+        # their inputs by explicit key rather than iterating obs.
+        topic_ts: dict = {}
         for obs_key, topic in self._state_topics.items():
             data = self.get_latest(topic)
             if data is not None:
                 obs[obs_key] = data
+                ts_in = self.get_timestamp(topic)
+                if ts_in is not None:
+                    topic_ts[obs_key] = ts_in
         for obs_key, topic in self._image_topics.items():
             data = self.get_latest(topic)
             if data is not None:
                 obs[obs_key] = data
+                ts_in = self.get_timestamp(topic)
+                if ts_in is not None:
+                    topic_ts[obs_key] = ts_in
+        obs["_topic_ts"] = topic_ts
+        # Session pause state. AgentNodes are not gated by pause (only RobotNode
+        # is), so an agent that wants to act on the handoff itself — e.g. the
+        # DAgger arbiter starting an episode the instant the arms go live — has
+        # to be told. Same "_" prefix convention as _topic_ts.
+        obs["_paused"] = self._paused
 
         _t_act = time.perf_counter()
         action = self._agent.act(obs)
@@ -177,7 +214,30 @@ class AgentNode(Node):
                     record=False,
                 )
 
+        # Generic extra topics, e.g. the DAgger arbiter's control-mode label.
+        # Recorded (unlike _images) — these are small scalar dicts and the label
+        # is only useful if it lands in the episode alongside the commands.
+        extras = action.get("_extras")
+        if extras:
+            for suffix, payload in extras.items():
+                self.publish(suffix, payload, ts=ts)
+
         self._publish_commands(action, ts)
+
+    def _check_reset_signal(self) -> None:
+        """Call agent.reset() on a rising edge of reset_topic."""
+        if not self._reset_topic:
+            return
+        msg = self.get_latest(self._reset_topic)
+        if msg is None or not msg.get("reset"):
+            return
+        msg_ts = self.get_timestamp(self._reset_topic)
+        if msg_ts is None or msg_ts == self._last_reset_ts:
+            return
+        self._last_reset_ts = msg_ts
+        if hasattr(self._agent, "reset"):
+            print(f"[{self.name}] reset requested via {self._reset_topic}")
+            self._agent.reset()
 
     def _publish_commands(self, action: dict, ts: float) -> None:
         if self._arm_key is not None:
@@ -239,6 +299,7 @@ class AgentNode(Node):
             "state_topics": params.get("state_topics"),
             "image_topics": params.get("image_topics"),
             "arm_key": params.get("arm_key"),
+            "reset_topic": params.get("reset_topic"),
             "normalize_gripper": params.get("normalize_gripper", False),
             "gripper_open_deg": params.get("gripper_open_deg", 85.0),
             "gripper_closed_deg": params.get("gripper_closed_deg", 5.0),

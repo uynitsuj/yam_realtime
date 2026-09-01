@@ -51,8 +51,7 @@ _TICKS_PER_REV = 4096
 _TICKS_TO_RAD = (2.0 * np.pi) / _TICKS_PER_REV
 
 # Distance (rad) from the leader gripper encoder's rest position (~0) to the
-# fully-squeezed position, in *either* direction. Lab42's market42 package uses
-# the same 0.67 rad constant for all passive gello leaders: the encoder is
+# fully-squeezed position, in *either* direction. The encoder is
 # mechanically zeroed at rest, and the trigger throw is ~0.67 rad regardless
 # of which way the encoder rotates when squeezed. Overriding per-instance is
 # supported via the agent's ``leader_gripper_range_rad`` kwarg.
@@ -193,7 +192,7 @@ class PassiveGelloLeaderAgent(Agent):
     ``gripper_cmd=0`` will map to ``gripper_limits[0]`` on the follower and
     ``gripper_cmd=1`` will map to ``gripper_limits[1]``. For YAM with
     ``gripper_limits: [0.0, -2.4]``, that's closed=0 at squeeze, open=1 at
-    rest. This mirrors lab42/market42's ``xdof/robots/passive_gello.py``.
+    rest. 
 
     Args:
         channel: SocketCAN interface (e.g. ``can_lead_l``).
@@ -208,8 +207,7 @@ class PassiveGelloLeaderAgent(Agent):
             command space (handled automatically by ``MotorChainRobot`` /
             ``SafeMotorChainRobot``).
         leader_gripper_range_rad: Distance (rad) from rest to fully-squeezed
-            on the leader encoder, in absolute value. Default 0.67 matches
-            lab42's convention. Override only if your hardware differs.
+            on the leader encoder, in absolute value. Default 0.67. Override only if your hardware differs.
         alpha: Exponential-smoothing factor applied per joint on each new CAN
             sample. 1.0 = no smoothing (default); <1.0 = low-pass filter.
         stale_warn_s: Log a warning if no CAN messages have arrived in this many
@@ -305,6 +303,31 @@ class PassiveGelloLeaderAgent(Agent):
     def action_spec(self) -> Dict[str, Dict[str, Array]]:
         n = NUM_ARM_JOINTS + (1 if self.include_gripper else 0)
         return {self.robot_name: {"pos": Array(shape=(n,), dtype=np.float32)}}
+
+    # ------------------------------------------------------------------ #
+    # Buttons / liveness
+    # ------------------------------------------------------------------ #
+
+    def get_buttons(self) -> tuple[bool, bool]:
+        """Return ``(button_0, button_1)`` from the gripper encoder.
+
+        The passive gello reports two switches packed into the gripper device's
+        ``digital_inputs`` byte. The bit split matches i2rt's own decoding in
+        ``dm_driver.PassiveEncoderReader._parse_encoder_message``::
+
+            button_state = [digital_inputs % 2, digital_inputs // 2]
+
+        which ``i2rt/utils/mujoco_control_interface.py`` labels
+        ``[button_top, button_grip]``. Both read False on hardware where the
+        switches aren't wired, so callers must treat "never pressed" as a
+        possible (if useless) steady state rather than an error.
+        """
+        raw = self._reader.get_buttons()
+        return bool(raw & 0x01), bool((raw >> 1) & 0x01)
+
+    def seconds_since_last_message(self) -> float:
+        """Seconds since the last CAN frame from this leader (staleness check)."""
+        return self._reader.seconds_since_last_message()
 
     # ------------------------------------------------------------------ #
     # Lifecycle
