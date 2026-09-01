@@ -305,6 +305,31 @@ class PassiveGelloLeaderAgent(Agent):
         return {self.robot_name: {"pos": Array(shape=(n,), dtype=np.float32)}}
 
     # ------------------------------------------------------------------ #
+    # Buttons / liveness
+    # ------------------------------------------------------------------ #
+
+    def get_buttons(self) -> tuple[bool, bool]:
+        """Return ``(button_0, button_1)`` from the gripper encoder.
+
+        The passive gello reports two switches packed into the gripper device's
+        ``digital_inputs`` byte. The bit split matches i2rt's own decoding in
+        ``dm_driver.PassiveEncoderReader._parse_encoder_message``::
+
+            button_state = [digital_inputs % 2, digital_inputs // 2]
+
+        which ``i2rt/utils/mujoco_control_interface.py`` labels
+        ``[button_top, button_grip]``. Both read False on hardware where the
+        switches aren't wired, so callers must treat "never pressed" as a
+        possible (if useless) steady state rather than an error.
+        """
+        raw = self._reader.get_buttons()
+        return bool(raw & 0x01), bool((raw >> 1) & 0x01)
+
+    def seconds_since_last_message(self) -> float:
+        """Seconds since the last CAN frame from this leader (staleness check)."""
+        return self._reader.seconds_since_last_message()
+
+    # ------------------------------------------------------------------ #
     # Lifecycle
     # ------------------------------------------------------------------ #
 

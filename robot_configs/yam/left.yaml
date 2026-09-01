@@ -31,5 +31,5 @@ joint_limits:
   - [-2.00, 2.00]
 # gripper_limits: [0.0, -2.4] # a smaller opening, full opening is -2.7
 enable_gripper_calibration: true
-limit_gripper_force: 50.0
+limit_gripper_force: 10.0
 # gripper_type: "yam_small"
