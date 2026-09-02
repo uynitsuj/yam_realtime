@@ -170,7 +170,7 @@ _LIVE_MODES = (MODE_POLICY, MODE_INTERVENTION, MODE_HANDBACK)
 class _ArmAnchor:
     """SE(3) reference frames latched at the instant of takeover, for one arm."""
 
-    __slots__ = ("T_lead_0", "T_fol_0")
+    __slots__ = ("T_fol_0", "T_lead_0")
 
     def __init__(self, T_lead_0: vtf.SE3, T_fol_0: vtf.SE3) -> None:
         self.T_lead_0 = T_lead_0
@@ -270,6 +270,7 @@ class DaggerInterventionAgent(Agent):
                        command rather than handing back, because silently
                        re-arming the policy mid-correction is the worse failure.
         include_gripper: Forwarded to the leaders; keep True for YAM.
+        button_debounce_s: Stable time required for button changes, using CAN timestamps.
     """
 
     use_joint_state_as_action: bool = False
@@ -300,6 +301,7 @@ class DaggerInterventionAgent(Agent):
         include_gripper: bool = True,
         leader_gripper_range_rad: Optional[float] = None,
         startup_timeout_s: float = 5.0,
+        button_debounce_s: float = 0.02,
     ) -> None:
         if takeover_button_index not in (0, 1):
             raise ValueError(f"takeover_button_index must be 0 or 1, got {takeover_button_index}")
@@ -349,6 +351,7 @@ class DaggerInterventionAgent(Agent):
             "joint_signs": joint_signs,
             "include_gripper": include_gripper,
             "startup_timeout_s": startup_timeout_s,
+            "button_debounce_s": button_debounce_s,
         }
         if leader_gripper_range_rad is not None:
             leader_kwargs["leader_gripper_range_rad"] = leader_gripper_range_rad
@@ -439,7 +442,7 @@ class DaggerInterventionAgent(Agent):
                  f"(index {self._episode_button_index})",
         )
 
-    def _parse_home(self, home) -> Optional[Dict[str, np.ndarray]]:
+    def _parse_home(self, home: Any) -> Optional[Dict[str, np.ndarray]]:
         """Normalise home_joint_pos into {arm: (7,) array}, or None."""
         if home is None:
             return None
@@ -474,7 +477,7 @@ class DaggerInterventionAgent(Agent):
         )
         logger.info("IK warm-up (JIT compile) took %.2f s", time.perf_counter() - t0)
 
-    def _fk_tcp(self, urdf, q_motor: np.ndarray) -> vtf.SE3:
+    def _fk_tcp(self, urdf: Any, q_motor: np.ndarray) -> vtf.SE3:
         """TCP pose in the arm's base frame, from joints in i2rt motor order."""
         urdf.update_cfg(np.flip(np.asarray(q_motor[:ARM_DOF], dtype=np.float64)))
         T_link6 = vtf.SE3.from_matrix(np.asarray(urdf.get_transform(EE_LINK, BASE_LINK)))

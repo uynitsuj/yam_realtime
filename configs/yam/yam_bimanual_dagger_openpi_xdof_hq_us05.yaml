@@ -197,6 +197,10 @@ nodes:
     agent_kwargs:
       left_channel: can_lead_l
       right_channel: can_lead_r
+      # Device 6 carries both switches in its 0x50F digital_inputs byte.
+      # Debouncing uses kernel CAN timestamps, so host scheduling and different
+      # encoder report rates cannot stretch a press into apparent seconds.
+      button_debounce_s: 0.02
       # Must match the passive-gello teleop config for this station.
       joint_signs: [-1, -1, 1, 1, -1, -1]
       include_gripper: true

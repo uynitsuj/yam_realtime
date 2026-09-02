@@ -2,7 +2,8 @@
 
 A passive GELLO has no actuators — it is a kinematically-matched skeleton
 whose joints carry magnetic encoders. Each encoder streams its angle on a
-shared SocketCAN bus (1 Mbit/s) as a fixed-format frame at CAN ID ``0x50F``.
+shared SocketCAN bus (1 Mbit/s) as a fixed-format frame at CAN ID ``0x50F``. Device 6 carries the two button bits
+in its ``digital_inputs`` byte.
 
 Frame layout (8 bytes? actually 6 bytes — see struct below):
 
@@ -27,7 +28,6 @@ and simply accept whatever rate the EEPROM is already set to (typically
 from __future__ import annotations
 
 import logging
-import struct
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -37,6 +37,11 @@ import numpy as np
 from dm_env.specs import Array
 
 from robots_realtime.agents.agent import Agent
+from robots_realtime.agents.teleoperation.passive_gello_protocol import (
+    ENCODER_REPORT_ID,
+    ButtonTracker,
+    decode_encoder_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +49,6 @@ NUM_ARM_JOINTS = 6
 GRIPPER_DEVICE_ID = 6
 NUM_DEVICES = NUM_ARM_JOINTS + 1
 
-_ENCODER_REPORT_ID = 0x50F
-_ENCODER_STRUCT = "!B h h B"
-_ENCODER_STRUCT_SIZE = struct.calcsize(_ENCODER_STRUCT)
 _TICKS_PER_REV = 4096
 _TICKS_TO_RAD = (2.0 * np.pi) / _TICKS_PER_REV
 
@@ -65,7 +67,13 @@ class _PassiveGelloReader:
     :meth:`get_joint_pos` from any thread.
     """
 
-    def __init__(self, channel: str, bitrate: int = 1_000_000, alpha: float = 1.0) -> None:
+    def __init__(
+        self,
+        channel: str,
+        bitrate: int = 1_000_000,
+        alpha: float = 1.0,
+        button_debounce_s: float = 0.02,
+    ) -> None:
         self._channel = channel
         self._alpha = float(alpha)
         self._bus = can.interface.Bus(interface="socketcan", channel=channel, bitrate=bitrate)
@@ -75,7 +83,7 @@ class _PassiveGelloReader:
         self._lock = threading.Lock()
         self._positions_rad = np.zeros(NUM_DEVICES, dtype=np.float64)
         self._velocities_rad = np.zeros(NUM_DEVICES, dtype=np.float64)
-        self._buttons = 0
+        self._button_tracker = ButtonTracker(debounce_s=button_debounce_s)
         self._seen_devices: set[int] = set()
         self._last_msg_time = time.time()
 
@@ -107,7 +115,7 @@ class _PassiveGelloReader:
 
     def get_buttons(self) -> int:
         with self._lock:
-            return self._buttons
+            return self._button_tracker.value
 
     def seconds_since_last_message(self) -> float:
         with self._lock:
@@ -137,11 +145,12 @@ class _PassiveGelloReader:
             msg = self._reader.get_message(timeout=0.1)
             if msg is None:
                 continue
-            if msg.arbitration_id != _ENCODER_REPORT_ID:
+            if msg.arbitration_id != ENCODER_REPORT_ID:
                 continue
-            if len(msg.data) != _ENCODER_STRUCT_SIZE:
+            report = decode_encoder_report(msg.data)
+            if report is None:
                 continue
-            device_id, pos_ticks, vel_ticks, digital_inputs = struct.unpack(_ENCODER_STRUCT, msg.data)
+            device_id, pos_ticks, vel_ticks, digital_inputs = report
             if device_id >= NUM_DEVICES:
                 continue
             # Ticks wrap at 4096; map into [-pi, pi) centered so zero config lands near zero.
@@ -157,9 +166,7 @@ class _PassiveGelloReader:
                 self._positions_rad[device_id] = filtered
                 self._velocities_rad[device_id] = vel_rad
                 if device_id == GRIPPER_DEVICE_ID:
-                    # Passive gellos carry button state in the gripper device's
-                    # digital_inputs field. Harmless if the button isn't wired.
-                    self._buttons = int(digital_inputs)
+                    self._button_tracker.update(digital_inputs, now=msg.timestamp)
                 self._seen_devices.add(device_id)
                 self._last_msg_time = time.time()
 
@@ -215,6 +222,7 @@ class PassiveGelloLeaderAgent(Agent):
         startup_timeout_s: How long to wait at startup for all 7 encoder devices
             to report at least once before raising.
         bitrate: SocketCAN bitrate. Passive gello encoders run at 1 Mbit/s.
+        button_debounce_s: Time a button state must remain stable before it is published.
     """
 
     use_joint_state_as_action: bool = False
@@ -231,6 +239,7 @@ class PassiveGelloLeaderAgent(Agent):
         stale_warn_s: float = 1.0,
         startup_timeout_s: float = 5.0,
         bitrate: int = 1_000_000,
+        button_debounce_s: float = 0.02,
     ) -> None:
         self.robot_name = robot_name
         self.channel = channel
@@ -251,7 +260,12 @@ class PassiveGelloLeaderAgent(Agent):
         self._stale_warn_s = float(stale_warn_s)
         self._last_stale_log = 0.0
 
-        self._reader = _PassiveGelloReader(channel=channel, bitrate=bitrate, alpha=alpha)
+        self._reader = _PassiveGelloReader(
+            channel=channel,
+            bitrate=bitrate,
+            alpha=alpha,
+            button_debounce_s=button_debounce_s,
+        )
         try:
             self._reader.wait_for_all_joints(timeout_s=startup_timeout_s)
         except Exception:
@@ -309,10 +323,11 @@ class PassiveGelloLeaderAgent(Agent):
     # ------------------------------------------------------------------ #
 
     def get_buttons(self) -> tuple[bool, bool]:
-        """Return ``(button_0, button_1)`` from the gripper encoder.
+        """Return ``(button_0, button_1)`` from the passive GELLO.
 
-        The passive gello reports two switches packed into the gripper device's
-        ``digital_inputs`` byte. The bit split matches i2rt's own decoding in
+        Device 6 reports both switches in its 0x50F ``digital_inputs`` byte.
+        The reader debounces that byte using kernel CAN timestamps. The bit
+        split matches i2rt.s own decoding in
         ``dm_driver.PassiveEncoderReader._parse_encoder_message``::
 
             button_state = [digital_inputs % 2, digital_inputs // 2]
