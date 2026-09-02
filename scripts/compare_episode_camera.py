@@ -20,6 +20,7 @@ import importlib
 import json
 import queue
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -104,10 +105,9 @@ def parse_args() -> argparse.Namespace:
         "--fov-crop",
         type=float,
         default=None,
-        help="Override the CameraNode publish_fov_crop value with this fraction of each "
-        "axis BEFORE the square crop/resize (in (0, 1]; 1.0 = off, 0.85 = ~15%% tighter FOV). "
-        "Mirrors CameraNode.publish_fov_crop so you can preview the deployment FOV against the "
-        "dataset frame.",
+        help="Initial top-camera publish_fov_crop fraction before resize (in (0, 1]; "
+        "1.0 = off, 0.88 = 12%% tighter FOV). It can be changed live in the webpage; "
+        "wrist cameras retain their configured FOV.",
     )
     args = p.parse_args()
     if args.dataset_path is not None:
@@ -747,7 +747,7 @@ COMPARISON_HTML = """<!doctype html>
 header{height:46px;flex:none;display:flex;gap:8px;align-items:center;padding:6px 10px;background:#151820;border-bottom:1px solid #303640}
 header>*{flex:none}.camera-toolbar>*{flex:none}
 button,input{background:#1d2129;color:#d7dae0;border:1px solid #3a404d;border-radius:6px;padding:4px 8px}input[type=range]{accent-color:#5b9dff;padding:0}
-#episode,#frame{width:150px}.muted{color:#929bad;font-size:11px}.workspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(520px,3fr) minmax(380px,2fr)}
+#episode,#frame{width:150px}#fov{width:110px}.muted{color:#929bad;font-size:11px}.workspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(520px,3fr) minmax(380px,2fr)}
 #camera-side{min-width:0;min-height:0;padding:6px;border-right:1px solid #303640;display:flex;flex-direction:column}.camera-toolbar{height:28px;display:flex;gap:8px;align-items:center}
 #rows{flex:1;min-height:0;display:grid;grid-template-rows:repeat(3,minmax(0,1fr));gap:5px}.compare{min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:18px minmax(0,1fr);gap:3px 6px}
 .compare h2{grid-column:1/-1;margin:0;font-size:12px}.pane{min-height:0;position:relative;background:#000;border:1px solid #292d36;border-radius:6px;overflow:hidden}.pane img{width:100%;height:100%;object-fit:contain;display:block}
@@ -755,12 +755,12 @@ button,input{background:#1d2129;color:#d7dae0;border:1px solid #3a404d;border-ra
 #viser-side{min-width:0;min-height:0;display:flex;flex-direction:column}.viser-title{height:28px;padding:6px 9px;background:#151820}.viser-title .blue{color:#4f8fff}.viser-title .orange{color:#ff6b35}iframe{flex:1;width:100%;border:0;background:#111}
 </style></head><body>
 <header><strong>Live ↔ LeRobot + URDF</strong><button id="prev-ep">◀ episode</button><input id="episode" type="range" min="0" step="1"><span id="episode-label"></span><button id="next-ep">episode ▶</button><button id="prev-frame">◀ frame</button><input id="frame" type="range" min="0" step="1"><span id="frame-label"></span><button id="next-frame">frame ▶</button><button id="move" style="border-color:#c44;color:#ff8b8b">Move robot</button><span id="status" class="muted"></span></header>
-<div class="workspace"><section id="camera-side"><div class="camera-toolbar"><label><input id="overlay" type="checkbox"> overlay cameras</label><span class="muted">dataset opacity</span><input id="opacity" type="range" min="0" max="1" step=".01"><span id="opacity-label"></span></div><main id="rows"></main></section><section id="viser-side"><div class="viser-title">URDF overlay — <span class="blue">blue dataset</span> / <span class="orange">orange live</span></div><iframe id="viser" src=""></iframe></section></div>
+<div class="workspace"><section id="camera-side"><div class="camera-toolbar"><label><input id="overlay" type="checkbox"> overlay cameras</label><span class="muted">dataset opacity</span><input id="opacity" type="range" min="0" max="1" step=".01"><span id="opacity-label"></span><span class="muted">top live FOV</span><input id="fov" type="range" min=".5" max="1" step=".01"><span id="fov-label"></span></div><main id="rows"></main></section><section id="viser-side"><div class="viser-title">URDF overlay — <span class="blue">blue dataset</span> / <span class="orange">orange live</span></div><iframe id="viser" src=""></iframe></section></div>
 <script>
-const byId=id=>document.getElementById(id);let state=null,selectTimer=null;
+const byId=id=>document.getElementById(id);let state=null,selectTimer=null,fovTimer=null;
 function setOpacity(v){v=Math.max(0,Math.min(1,Number(v)));byId("opacity").value=v;byId("opacity-label").textContent=v.toFixed(2);document.documentElement.style.setProperty("--opacity",v)}
 function build(){byId("rows").innerHTML=state.views.map(view=>"<section class='compare' id='compare-"+view+"'><h2>"+view+"</h2><div class='pane live'><span class='tag'>live</span><img src='/live/"+view+".mjpg'></div><div class='pane dataset'><span class='tag'>dataset</span><img id='dataset-"+view+"'></div></section>").join("");}
-function render(){byId("episode").max=state.episode_max;byId("episode").value=state.episode;byId("episode-label").textContent=state.episode+" / "+state.episode_max;byId("frame").max=Math.max(0,state.frame_count-1);byId("frame").value=state.frame;byId("frame-label").textContent=state.frame+" / "+Math.max(0,state.frame_count-1)+" ("+state.time_s.toFixed(2)+"s)";const prep=state.camera_preprocess[state.views[0]]||{};byId("status").textContent=(state.robot_ready?"robot ready":"viewer only")+" · dataset joints "+(state.dataset_flip_joint_order?"flipped":"native")+" · video "+(prep.resize_mode||"native")+" · fov "+(prep.fov_crop||1);for(const view of state.views)byId("dataset-"+view).src="/dataset/"+view+".jpg?r="+state.revision;}
+function render(){byId("episode").max=state.episode_max;byId("episode").value=state.episode;byId("episode-label").textContent=state.episode+" / "+state.episode_max;byId("frame").max=Math.max(0,state.frame_count-1);byId("frame").value=state.frame;byId("frame-label").textContent=state.frame+" / "+Math.max(0,state.frame_count-1)+" ("+state.time_s.toFixed(2)+"s)";const prep=state.camera_preprocess.top||state.camera_preprocess[state.views[0]]||{};if(document.activeElement!==byId("fov")){byId("fov").value=prep.fov_crop||1;byId("fov-label").textContent=Number(prep.fov_crop||1).toFixed(2)}byId("status").textContent=(state.robot_ready?"robot ready":"viewer only")+" · dataset joints "+(state.dataset_flip_joint_order?"flipped":"native")+" · video "+(prep.resize_mode||"native")+" · top fov "+Number(prep.fov_crop||1).toFixed(2);for(const view of state.views)byId("dataset-"+view).src="/dataset/"+view+".jpg?r="+state.revision;}
 async function refresh(){state=await(await fetch("/api/state")).json();render()}
 async function select(episode,frame){await fetch("/api/select?episode="+episode+"&frame="+frame,{method:"POST"});setTimeout(refresh,80)}
 function schedule(){clearTimeout(selectTimer);selectTimer=setTimeout(()=>select(Number(byId("episode").value),Number(byId("frame").value)),80)}
@@ -768,6 +768,7 @@ function schedule(){clearTimeout(selectTimer);selectTimer=setTimeout(()=>select(
 byId("episode").oninput=e=>{byId("episode-label").textContent=e.target.value+" / "+state.episode_max};byId("episode").onchange=()=>select(Number(byId("episode").value),0);byId("frame").oninput=e=>{byId("frame-label").textContent=e.target.value+" / "+Math.max(0,state.frame_count-1);schedule()};
 byId("prev-ep").onclick=()=>select(Math.max(0,state.episode-1),0);byId("next-ep").onclick=()=>select(Math.min(state.episode_max,state.episode+1),0);byId("prev-frame").onclick=()=>select(state.episode,Math.max(0,state.frame-1));byId("next-frame").onclick=()=>select(state.episode,Math.min(state.frame_count-1,state.frame+1));
 byId("move").onclick=()=>fetch("/api/move",{method:"POST"});byId("opacity").oninput=e=>setOpacity(e.target.value);byId("overlay").onchange=e=>document.querySelectorAll(".compare").forEach(row=>row.classList.toggle("overlay",e.target.checked));
+byId("fov").oninput=e=>{const v=Number(e.target.value);byId("fov-label").textContent=v.toFixed(2);clearTimeout(fovTimer);fovTimer=setTimeout(()=>fetch("/api/fov?value="+v,{method:"POST"}),40)};
 </script></body></html>"""
 
 
@@ -816,6 +817,14 @@ def make_comparison_app(
         request_queue.put(("move", int(current["episode_idx"]), int(current["frame_idx"])))
         return {"accepted": True}
 
+    async def api_fov(value: float) -> dict:
+        if not 0.5 <= value <= 1.0:
+            raise HTTPException(400, "FOV crop must be in [0.5, 1.0]")
+        if "top" not in current["camera_preprocess"]:
+            raise HTTPException(404, "Top camera is not enabled")
+        current["camera_preprocess"]["top"]["fov_crop"] = float(value)
+        return {"accepted": True, "view": "top", "fov_crop": float(value)}
+
     async def dataset_jpeg(view: str) -> Response:
         if view not in views:
             raise HTTPException(404, view)
@@ -855,6 +864,7 @@ def make_comparison_app(
     app.add_api_route("/api/state", api_state)
     app.add_api_route("/api/select", api_select, methods=["POST"])
     app.add_api_route("/api/move", api_move, methods=["POST"])
+    app.add_api_route("/api/fov", api_fov, methods=["POST"])
     app.add_api_route("/dataset/{view}.jpg", dataset_jpeg)
     app.add_api_route("/live/{view}.mjpg", live_mjpeg)
     return app
@@ -862,6 +872,14 @@ def make_comparison_app(
 
 def main() -> None:
     args = parse_args()
+    shutdown_requested = threading.Event()
+
+    def _request_shutdown(_signum: int, _frame: Any) -> None:
+        shutdown_requested.set()
+
+    for shutdown_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(shutdown_signal, _request_shutdown)
+
     local_root = Path(args.dataset_path).expanduser().resolve() if args.dataset_path else None
     views = args.camera_views
 
@@ -905,6 +923,8 @@ def main() -> None:
     layout = load_yam_viser_layout(args.camera_config, args.urdf_path)
     dataset_flip_joint_order = load_policy_flip_joint_order(args.camera_config)
     camera_preprocess = load_camera_preprocess_specs(args.camera_config, views)
+    if args.fov_crop is not None and "top" in camera_preprocess:
+        camera_preprocess["top"]["fov_crop"] = args.fov_crop
     station_robot_specs = load_robot_node_specs(args.camera_config)
     print(f"Dataset joint-order flip: {dataset_flip_joint_order}")
     print(f"Live camera preprocessing: {camera_preprocess}")
@@ -1277,7 +1297,7 @@ def main() -> None:
 
     last_live_update = 0.0
     try:
-        while True:
+        while not shutdown_requested.is_set():
             try:
                 while True:
                     kind, first, second = request_queue.get_nowait()
@@ -1331,9 +1351,7 @@ def main() -> None:
                 for view, cam in rs_cams.items():
                     try:
                         camera_data = cam.read()
-                        live_frame = preprocess_live_camera_frame(
-                            camera_data.images["rgb"], camera_preprocess[view], args.fov_crop
-                        )
+                        live_frame = preprocess_live_camera_frame(camera_data.images["rgb"], camera_preprocess[view])
                         live_image_handles[view].image = live_frame
                         live_frames[view] = live_frame
                     except Exception as exc:
@@ -1343,6 +1361,17 @@ def main() -> None:
     except KeyboardInterrupt:
         print("Stopping viewer")
     finally:
+        robots_to_zero = {
+            side: robot for side, robot in (("left", left_robot), ("right", right_robot)) if robot is not None
+        }
+        if robots_to_zero:
+            current["robot_ready"] = False
+            print("Zeroing both arms before viewer shutdown ...")
+            try:
+                zero_robots_safely(robots_to_zero, args.move_duration)
+                print("Shutdown zeroing complete")
+            except Exception as exc:
+                print(f"Warning: shutdown zeroing failed: {exc}", file=sys.stderr)
         for robot in (left_robot, right_robot):
             if robot is not None and hasattr(robot, "close"):
                 robot.close()
