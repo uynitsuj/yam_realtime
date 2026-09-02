@@ -20,7 +20,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-
 _ERROR_PATTERN = re.compile(
     r"\b(ERROR|CRITICAL)\b|Traceback \(most recent call last\)|^\s*\w*(Error|Exception):"
 )
@@ -95,14 +94,17 @@ def _recording_line(session) -> Text:
 
 def _help_line(session=None) -> Text:
     t = Text(justify="right", style="dim")
-    t.append("[r]", style="bold white"); t.append(" record  ")
-    t.append("[d]", style="bold white"); t.append(" discard  ")
+    t.append("[r]", style="bold white")
+    t.append(" save+home  ")
+    t.append("[d]", style="bold white")
+    t.append(" discard  ")
     t.append("[space]", style="bold white")
     if session is not None and session.is_paused:
         t.append(" resume  ")
     else:
         t.append(" pause  ")
-    t.append("[q]", style="bold white"); t.append(" quit")
+    t.append("[q]", style="bold white")
+    t.append(" quit")
     return t
 
 
@@ -206,7 +208,7 @@ def _read_keys(session, stop_event: threading.Event) -> None:
         if _stdin_ready():
             ch = sys.stdin.read(1)
             if ch == "r":
-                session.toggle_recording()
+                session.save_and_rehome()
             elif ch == "d":
                 session.end_episode(save=False)
             elif ch == " ":

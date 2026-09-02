@@ -20,7 +20,8 @@ class FakeLeader:
 
 D.PassiveGelloLeaderAgent = FakeLeader
 HOME = np.array([0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0])
-agent = D.DaggerInterventionAgent(handback_blend_s=0.3, handback_fresh_timeout_s=0.5,
+agent = D.DaggerInterventionAgent(episode_button_arm="left",
+                                  handback_blend_s=0.3, handback_fresh_timeout_s=0.5,
                                   home_joint_pos=list(HOME), home_on_episode_end=True,
                                   homing_max_joint_speed=8.0, home_tol_rad=0.03)
 L = agent._leaders
@@ -314,6 +315,26 @@ try:
     check("same index for both buttons raises", False)
 except ValueError as e:
     check("same index for both buttons raises", True, f"({e.__class__.__name__})")
+
+
+print("\n[18] right lower button is inert; TUI rehome request saves and homes")
+agent.reset(); agent._mode = "policy"; agent._record_latch = True
+agent._paused_prev = False; paused[0] = False
+L["right"].buttons = (False, True)
+run(1)
+L["right"].buttons = (False, False)
+run(1)
+check("right lower button does not end the episode",
+      agent._record_latch is True and agent._mode == "policy")
+request_obs = obs()
+request_obs["rehome_request"] = {"request": True}
+request_obs["_topic_ts"]["rehome_request"] = 12345.0
+request_action = agent.act(request_obs)
+check("TUI request drops the recording latch", request_action.get("_record") is False)
+check("TUI request starts homing", agent._mode in ("homing", "idle"))
+check("TUI request flushes policy state", "policy_reset" in request_action["_extras"])
+repeat_action = agent.act(request_obs)
+check("same TUI request is consumed once", "policy_reset" not in repeat_action["_extras"])
 
 
 # ── [17] regression: the IK loop must not latch up ───────────────────────────

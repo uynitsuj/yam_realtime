@@ -6,13 +6,9 @@ on command clipping to prevent future violations.
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
-
-from i2rt.motor_drivers.dm_driver import MotorChain
 from i2rt.robots.motor_chain_robot import MotorChainRobot
-from i2rt.robots.utils import GripperType
 
 
 class SafeMotorChainRobot(MotorChainRobot):
@@ -23,8 +19,9 @@ class SafeMotorChainRobot(MotorChainRobot):
     miscalibration), but during operation, violations only log warnings.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, allow_initial_joint_limit_violation: bool = False, **kwargs):
         self._initialization_complete = False
+        self._allow_initial_joint_limit_violation = bool(allow_initial_joint_limit_violation)
         super().__init__(*args, **kwargs)
         self._initialization_complete = True
 
@@ -68,21 +65,15 @@ class SafeMotorChainRobot(MotorChainRobot):
         if np.any(lower_violations) or np.any(upper_violations):
             violation_details = []
 
-            for i, (pos, lower, upper) in enumerate(
-                zip(arm_pos, lower_limits, upper_limits, strict=False)
-            ):
+            for i, (pos, lower, upper) in enumerate(zip(arm_pos, lower_limits, upper_limits, strict=False)):
                 if pos < lower:
-                    violation_details.append(
-                        f"Joint {i}: {pos:.4f} < {lower:.4f} (lower limit)"
-                    )
+                    violation_details.append(f"Joint {i}: {pos:.4f} < {lower:.4f} (lower limit)")
                 elif pos > upper:
-                    violation_details.append(
-                        f"Joint {i}: {pos:.4f} > {upper:.4f} (upper limit)"
-                    )
+                    violation_details.append(f"Joint {i}: {pos:.4f} > {upper:.4f} (upper limit)")
 
             violation_msg = "; ".join(violation_details)
 
-            if not self._initialization_complete:
+            if not self._initialization_complete and not self._allow_initial_joint_limit_violation:
                 # During initialization: fatal error (miscalibrated robot)
                 self.motor_chain.running = False
                 raise RuntimeError(
@@ -91,9 +82,14 @@ class SafeMotorChainRobot(MotorChainRobot):
                     "possible solution: 1. move the arm to zero position and power cycle the robot. "
                     "2. Recalibrate the motor zero position."
                 )
+            elif not self._initialization_complete:
+                logging.warning(
+                    "%s: Initial joint limit violation allowed for immediate homing: %s",
+                    self,
+                    violation_msg,
+                )
             else:
                 # During runtime: just log a warning (minor overshoot from PID)
                 logging.warning(
-                    f"{self}: Joint limit violation (non-fatal): {violation_msg}. "
-                    "Commands will be clipped."
+                    f"{self}: Joint limit violation (non-fatal): {violation_msg}. Commands will be clipped."
                 )

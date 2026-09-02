@@ -57,10 +57,12 @@ def _resolve(obj):
     return obj
 
 
-def _instantiate_from_target_yaml(config_path: str):
-    """Load a YAML config and recursively instantiate all ``_target_`` objects."""
+def _instantiate_from_target_yaml(config_path: str, overrides: dict | None = None) -> object:
+    """Load a target YAML, apply top-level station overrides, and instantiate it."""
     with open(config_path) as f:
         cfg = _yaml.safe_load(f)
+    if overrides:
+        cfg.update(overrides)
     return _resolve(cfg)
 
 
@@ -78,6 +80,8 @@ class RobotNode(Node):
         name:      Node name on the bus.
         cmd_topic: Full topic to subscribe to for joint position commands.
                    If None the node runs in read-only mode.
+        robot_config_overrides: Top-level values merged over ``robot_config``
+                                before the robot driver is instantiated.
         writer:    Optional Writer injected at construction for recording.
     """
 
@@ -92,6 +96,7 @@ class RobotNode(Node):
         name: str = "robot",
         cmd_topic: str | None = None,
         robot_config: str | None = None,
+        robot_config_overrides: dict | None = None,
         poll_freq: float | None = None,
         startup_joint_pos: list[float] | None = None,
         startup_duration_s: float = 2.0,
@@ -114,6 +119,7 @@ class RobotNode(Node):
         self._robot = robot
         self._cmd_topic = cmd_topic
         self._robot_config = robot_config  # stored for reference; instantiation is caller's job
+        self._robot_config_overrides = robot_config_overrides or {}
         self._startup_joint_pos = startup_joint_pos
         self._startup_duration_s = startup_duration_s
         self._shutdown_joint_pos = shutdown_joint_pos
@@ -225,7 +231,7 @@ class RobotNode(Node):
                     f"[{self.name}] RobotNode.robot is None — inject a robot driver before starting. "
                     f"(robot_config={self._robot_config!r})"
                 )
-            self._robot = _instantiate_from_target_yaml(self._robot_config)
+            self._robot = _instantiate_from_target_yaml(self._robot_config, self._robot_config_overrides)
 
         if self._startup_joint_pos is not None:
             print(f"[{self.name}] Moving to startup pose over {self._startup_duration_s:.1f}s")

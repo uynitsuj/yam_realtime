@@ -120,7 +120,8 @@ def _center_crop_and_resize(img: np.ndarray, target_h: int, target_w: int) -> np
 class ModelIOConfig:
     """What obs keys the policy server expects and what action keys it returns.
 
-    Defaults match the OpenPI bimanual YAM schema. Override via kwargs if your model was trained with different keys.
+    Defaults match the OpenPI bimanual YAM schema (lab42 passive-gello training
+    runs). Override via kwargs if your model was trained with different keys.
     """
 
     action_keys: Tuple[str, ...] = (
@@ -247,8 +248,13 @@ class AsyncDiffusionAgent(PolicyAgent):
         # Mismatch = the model sees out-of-distribution inputs (black bars
         # or wrong FOV) and can produce unsafe actions.
         image_preprocess: ImagePreprocess = "center_crop",
-        # Task prompt sent with every inference request. Overrides the server's
-        # default when set; ``None`` keeps the server-default behavior.
+        # Task prompt sent with every inference request. Overrides the
+        # server's ``default_prompt`` (openpi's InjectDefaultPrompt only fires
+        # when the obs carries no "prompt" key). Matters most for pi0.5
+        # checkpoints, which are strongly language-conditioned — set this to
+        # the training-time task string (e.g. "Folding tshirt pile and
+        # stacking"). ``None`` keeps the old behaviour: no prompt sent, server
+        # default applies.
         prompt: str | None = None,
         # Siemens LeRobot checkpoints reverse the six arm joints during dataset
         # conversion. Enable this to map live motor-order observations into the

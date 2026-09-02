@@ -209,6 +209,8 @@ class DaggerInterventionAgent(Agent):
                        end-and-save), or None to disable. 0 = YELLOW (top),
                        1 = WHITE (lower); defaults to white. Must differ from
                        ``takeover_button_index``.
+        episode_button_arm: Limit the episode button to ``left`` or ``right``;
+                       None accepts it from either leader.
         record_on_unpause: Start an episode on the paused→unpaused edge and end
                        it on the unpaused→paused edge. On by default, because
                        unpausing hands the arms to the policy and a rollout that
@@ -282,6 +284,7 @@ class DaggerInterventionAgent(Agent):
         joint_signs: Optional[List[int]] = None,
         takeover_button_index: int = BUTTON_YELLOW_TOP,
         episode_button_index: Optional[int] = BUTTON_WHITE_LOWER,
+        episode_button_arm: Optional[str] = None,
         record_on_unpause: bool = True,
         home_joint_pos: Optional[Any] = None,
         home_on_episode_end: bool = True,
@@ -314,11 +317,17 @@ class DaggerInterventionAgent(Agent):
                     f"{takeover_button_index} — the gello only has two buttons, so they must differ"
                 )
 
+        if episode_button_arm not in (None, "left", "right"):
+            raise ValueError(
+                f"episode_button_arm must be left, right or null, got {episode_button_arm!r}"
+            )
+
         self.arms = ["left", "right"]
         self._button_index = int(takeover_button_index)
         self._episode_button_index = (
             None if episode_button_index is None else int(episode_button_index)
         )
+        self._episode_button_arm = episode_button_arm
         self._handback_blend_s = float(handback_blend_s)
         self._handback_fresh_timeout_s = float(handback_fresh_timeout_s)
         self._max_joint_speed = float(max_joint_speed)
@@ -393,6 +402,7 @@ class DaggerInterventionAgent(Agent):
         self._mode = MODE_IDLE if self._home_on_episode_end else MODE_POLICY
         # Per (arm, button index) previous level, for rising-edge detection.
         self._prev_button = {(arm, i): False for arm in self.arms for i in (0, 1)}
+        self._button_edges_by_arm = {(arm, i): False for arm in self.arms for i in (0, 1)}
         # Latched record request. Session edge-detects it on record_topic; this
         # agent is the only thing that drives it (see the module docstring).
         self._record_latch = False
@@ -400,6 +410,7 @@ class DaggerInterventionAgent(Agent):
         # None until the first observation, so we never mistake "first tick" for
         # a pause transition.
         self._paused_prev: Optional[bool] = None
+        self._last_rehome_request_ts: Optional[float] = None
         self._anchors: Dict[str, _ArmAnchor] = {}
         self._takeover_count = 0
         self._switch_t = time.monotonic()
@@ -614,15 +625,25 @@ class DaggerInterventionAgent(Agent):
             self._anchors.clear()
             self._ik_q.clear()
 
-    def _poll_button_edges(self) -> Dict[int, bool]:
-        """Rising edges per button index, ORed across *both* leaders.
+    def _poll_rehome_request(self, obs: Dict[str, Any]) -> bool:
+        """Consume a new session/rehome request exactly once."""
+        request = obs.get("rehome_request")
+        request_ts = obs.get("_topic_ts", {}).get("rehome_request")
+        if not isinstance(request, dict) or not request.get("request") or request_ts is None:
+            return False
+        if request_ts == self._last_rehome_request_ts:
+            return False
+        self._last_rehome_request_ts = float(request_ts)
+        self._record_latch = False
+        self._policy_reset_pending = True
+        logger.info("episode END (saving) — TUI save+home request")
+        self._enter_homing(obs)
+        return True
 
-        Rising-edge latch matching yam_leader_agent's enable-button handling; the
-        buttons are momentary switches, so level-triggering would fire on every
-        tick they stay held. Either leader's button acts on both arms — takeover
-        is global, and so is the episode.
-        """
+    def _poll_button_edges(self) -> Dict[int, bool]:
+        """Record per-leader rising edges and return their per-index OR."""
         edges = {0: False, 1: False}
+        self._button_edges_by_arm = {(arm, i): False for arm in self.arms for i in (0, 1)}
         for arm in self.arms:
             try:
                 levels = self._leaders[arm].get_buttons()
@@ -630,8 +651,9 @@ class DaggerInterventionAgent(Agent):
                 levels = (False, False)
             for i in (0, 1):
                 pressed = bool(levels[i])
-                if pressed and not self._prev_button[(arm, i)]:
-                    edges[i] = True
+                rising = pressed and not self._prev_button[(arm, i)]
+                self._button_edges_by_arm[(arm, i)] = rising
+                edges[i] = edges[i] or rising
                 self._prev_button[(arm, i)] = pressed
         return edges
 
@@ -899,12 +921,13 @@ class DaggerInterventionAgent(Agent):
         self._last_act_t = now
 
         self._poll_pause_edge(obs)
+        rehome_requested = self._poll_rehome_request(obs)
 
         edges = self._poll_button_edges()
 
         # ── Yellow: takeover / hand back. Only meaningful mid-rollout; ignored
         # while parked, where there is no episode to correct.
-        if edges[self._button_index]:
+        if not rehome_requested and edges[self._button_index]:
             if self._mode == MODE_INTERVENTION:
                 self._enter_handback(obs)
             elif self._mode in (MODE_POLICY, MODE_HANDBACK):
@@ -916,11 +939,19 @@ class DaggerInterventionAgent(Agent):
                     BUTTON_COLOURS.get(self._episode_button_index, "episode"),
                 )
 
-        # ── White: the rollout cycle.
-        if self._episode_button_index is not None and edges[self._episode_button_index]:
+        # ── White: the rollout cycle. This deployment scopes it to the left
+        # leader so the right lower button cannot accidentally end an episode.
+        episode_edge = False
+        if self._episode_button_index is not None:
+            if self._episode_button_arm is None:
+                episode_edge = edges[self._episode_button_index]
+            else:
+                episode_edge = self._button_edges_by_arm[(self._episode_button_arm, self._episode_button_index)]
+        if not rehome_requested and self._episode_button_index is not None and episode_edge:
             colour = BUTTON_COLOURS.get(self._episode_button_index, "?")
             if self._mode in _LIVE_MODES:
                 self._record_latch = False
+                self._policy_reset_pending = True
                 logger.info("episode END (saving) — %s button", colour)
                 self._enter_homing(obs)
             else:

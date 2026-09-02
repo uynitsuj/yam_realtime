@@ -25,9 +25,9 @@ from pathlib import Path
 import zmq
 
 from robots_realtime.runtime.node import Node, ProcessHost
-from robots_realtime.runtime.transport.message_bus import MessageBus, DEFAULT_SUB_PORT
+from robots_realtime.runtime.transport.message_bus import DEFAULT_SUB_PORT, MessageBus
+from robots_realtime.runtime.transport.publisher import Publisher
 from robots_realtime.runtime.transport.serialization import unpack
-
 
 _HZ_WINDOW = 30
 
@@ -142,6 +142,7 @@ class Session:
         self._record_node_names: list[str] = record_node_names or all_node_names
 
         self._bus = MessageBus(pub_port=pub_port, sub_port=sub_port)
+        self._control_publisher: Publisher | None = None
 
         self._status: dict[str, NodeStatus] = {
             name: NodeStatus(name=name) for name in all_node_names
@@ -165,6 +166,7 @@ class Session:
         self._log_dir = Path(tempfile.mkdtemp(prefix="rr_logs_"))
 
         self._bus.start()
+        self._control_publisher = Publisher(node_name="session", port=self._pub_port)
         time.sleep(0.1)
 
         for host in self._hosts:
@@ -213,6 +215,9 @@ class Session:
             t.start()
         for t in threads:
             t.join(timeout=8.0)
+        if self._control_publisher is not None:
+            self._control_publisher.close()
+            self._control_publisher = None
         self._bus.stop()
 
     def wait(self) -> None:
@@ -296,6 +301,24 @@ class Session:
             self.end_episode(save=True)
         else:
             self.start_episode()
+
+    def save_and_rehome(self) -> Path | None:
+        """Save the active episode and request the DAgger arbiter to home.
+
+        Keep _prev_record_signal unchanged until DAgger publishes its False
+        latch. This prevents an in-flight True message from immediately
+        starting a spurious new episode between the direct save and rehome.
+        """
+        episode_dir = self.end_episode(save=True)
+        if self._control_publisher is None:
+            raise RuntimeError("session control publisher is not running")
+        self._control_publisher.publish(
+            "rehome",
+            {"request": True},
+            ts=time.time(),
+            record=False,
+        )
+        return episode_dir
 
     # ------------------------------------------------------------------
     # Pause / resume — gates RobotNode command output; other nodes keep
