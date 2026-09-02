@@ -51,6 +51,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 import webbrowser
 from typing import Any
 
@@ -145,6 +146,15 @@ class ViserMonitorNode(Node):
         n_chunk_frames: int = 10,
         chunk_frame_axes_length: float = 0.03,
         chunk_frame_axes_radius: float = 0.0025,
+        # ── Gizmo teleop + command-mode control ───────────────────────────────
+        # teleop: dict passed to YamPyrokiViserAgent (bimanual, right_arm_extrinsic,
+        # max_joint_speed, ...). Present => this node becomes a COMMAND SOURCE:
+        # draggable end-effector gizmos publish {name}/{arm}_pos, which a RobotNode
+        # picks up via its `teleop_cmd_topic`. Absent => read-only, as before.
+        teleop: dict | None = None,
+        # Names of the nodes that must be paused while teleop drives, i.e. the
+        # policy AgentNode(s). Sent to the Session, which owns per-node pausing.
+        policy_nodes: list[str] | None = None,
         writer=None,
         **kwargs,
     ) -> None:
@@ -154,11 +164,16 @@ class ViserMonitorNode(Node):
         self._n_chunk_frames = int(max(0, n_chunk_frames))
         self._chunk_axes_length = float(chunk_frame_axes_length)
         self._chunk_axes_radius = float(chunk_frame_axes_radius)
+        self._teleop_cfg = dict(teleop) if teleop else None
+        self._policy_nodes = list(policy_nodes or [])
         self.subscribed_topics = (
             [spec["state_topic"] for spec in self._urdfs_spec.values() if "state_topic" in spec]
             + list(self._image_topics.values())
             + ([self._chunk_topic] if self._chunk_topic else [])
+            + (["session/state"] if self._teleop_cfg else [])
         )
+        if self._teleop_cfg:
+            self.published_topics = list(self.published_topics) + ["left_pos", "right_pos"]
         # poll_freq drives how often the URDF/image GUI updates — lower is cheaper.
         self.poll_freq = float(viz_freq)
         super().__init__(name=name, writer=writer, **kwargs)
@@ -280,6 +295,17 @@ class ViserMonitorNode(Node):
 
         if self._auto_open_browser:
             self._open_browser()
+
+        # Optional: gizmo teleop + command-mode control. Turns this node from a
+        # read-only monitor into a command source; see _setup_teleop.
+        if self._teleop_cfg:
+            try:
+                self._setup_teleop()
+                logger.info("[%s] gizmo teleop enabled (policy_nodes=%s)",
+                            self.name, self._policy_nodes)
+            except Exception as exc:
+                logger.exception("[%s] teleop setup FAILED, staying read-only: %s", self.name, exc)
+                self._teleop_cfg = None
 
     def _add_gripper(self, arm_key: str, arm_root: str, gripper_spec: dict) -> None:
         """Attach a gripper's 3 meshes + 2 animated tip frames under the arm's attach_link.
@@ -484,7 +510,136 @@ class ViserMonitorNode(Node):
                 except Exception:
                     pass
 
+    # ------------------------------------------------------------------ #
+    # Gizmo teleop + command-mode control
+    # ------------------------------------------------------------------ #
+
+    def _setup_teleop(self) -> None:
+        """Draggable EE gizmos + the OFF/TELEOP/POLICY selector.
+
+        The gizmos and IK come from YamPyrokiViserAgent unchanged — it accepts
+        an injected viser server, so it shares THIS page rather than serving a
+        second port. That reuse matters: the agent already carries the
+        sync-on-start, slew limiting and goal filtering that make handing a real
+        arm to a browser control safe.
+
+        Mode arbitration lives in the Session (it owns per-node pausing); this
+        node only requests a mode on `session/control` and mirrors whatever the
+        session reports back, so the viser control and the TUI space bar can
+        never disagree about what is actually true.
+        """
+        from robots_realtime.agents.teleoperation.yam_pyroki_viser_agent import (  # noqa: PLC0415
+            YamPyrokiViserAgent,
+        )
+        from robots_realtime.runtime.transport.publisher import Publisher  # noqa: PLC0415
+
+        cfg = dict(self._teleop_cfg or {})
+        cfg.setdefault("bimanual", True)
+        cfg.setdefault("sync_on_start", True)
+        # Never live on startup: entering teleop must be a deliberate act.
+        cfg["armed"] = False
+        cfg["viser_server"] = self._server
+        self._teleop = YamPyrokiViserAgent(**cfg)
+        # Publish AS "session" so the topic is exactly Session.CONTROL_TOPIC
+        # ("session/control"), which the session's control listener subscribes
+        # to. The node-name prefix IS the topic namespace here, not an identity.
+        self._ctrl_pub = Publisher("session", port=self._publisher_port())
+
+        with self._server.gui.add_folder("control"):
+            self._gui_mode = self._server.gui.add_dropdown(
+                "mode", ("off", "teleop", "policy"), initial_value="off")
+            self._gui_armed = self._server.gui.add_checkbox("gizmos armed", False)
+            self._gui_state = self._server.gui.add_text("session", "off", disabled=True)
+
+        @self._gui_mode.on_update
+        def _(_) -> None:
+            # Arming never survives a mode change — re-entering teleop always
+            # starts disarmed and re-syncs the gizmos onto the measured pose.
+            self._gui_armed.value = False
+            self._request_mode(self._gui_mode.value)
+
+        @self._gui_armed.on_update
+        def _(_) -> None:
+            armed = bool(self._gui_armed.value) and self._gui_mode.value == "teleop"
+            if self._gui_armed.value and self._gui_mode.value != "teleop":
+                self._gui_armed.value = False           # only meaningful in teleop
+                return
+            self._teleop.set_armed(armed)
+
+        self._request_mode("off")
+
+    def _publisher_port(self) -> int:
+        from robots_realtime.runtime.transport.message_bus import DEFAULT_PUB_PORT  # noqa: PLC0415
+        return DEFAULT_PUB_PORT
+
+    def _request_mode(self, mode: str) -> None:
+        if getattr(self, "_ctrl_pub", None) is None:
+            return
+        try:
+            self._ctrl_pub.publish("control", {
+                "action": "set_mode", "mode": mode,
+                "policy_nodes": self._policy_nodes, "ts": time.time(),
+            }, record=False)
+        except Exception as exc:                                    # noqa: BLE001
+            logger.debug("[%s] mode request failed: %s", self.name, exc)
+
+    def _step_teleop(self) -> None:
+        """Mirror session state, then publish gizmo commands when in teleop."""
+        st = self.get_latest("session/state")
+        if st:
+            mode = str(st.get("mode", "off"))
+            self._gui_state.value = (
+                f"{mode}" + ("  (recording)" if st.get("recording") else "")
+            )
+            if mode != self._gui_mode.value:
+                # Session is the source of truth — e.g. the operator hit space
+                # in the TUI. Reflect it without re-requesting.
+                self._gui_mode.value = mode
+                if mode != "teleop":
+                    self._gui_armed.value = False
+                    self._teleop.set_armed(False)
+
+        obs: dict = {}
+        for arm_key, spec in self._urdfs_spec.items():
+            topic = spec.get("state_topic")
+            arm = spec.get("chunk_arm_key") or arm_key.replace("yam_", "")
+            data = self.get_latest(topic) if topic else None
+            if data is not None:
+                obs[arm] = data
+        if not obs:
+            return
+
+        action = self._teleop.act(obs)
+        # Publish ONLY in teleop: in policy mode the policy agent owns the arms,
+        # and RobotNode resolves its two command topics by freshness — a stray
+        # publish here would steal control mid-rollout.
+        if self._gui_mode.value != "teleop" or not self._gui_armed.value:
+            return
+        ts = time.time()
+        for arm, act in (action or {}).items():
+            pos = act.get("pos") if isinstance(act, dict) else act
+            if pos is not None:
+                self.publish(f"{arm}_pos", {"joint_pos": np.asarray(pos, dtype=np.float32)}, ts=ts)
+
+    def pause(self) -> None:
+        super().pause()
+        # Session pause (space) is the master off. Drop the arm gate too, so a
+        # later resume cannot come back already live.
+        if getattr(self, "_teleop", None) is not None:
+            try:
+                self._teleop.set_armed(False)
+                self._gui_armed.value = False
+                self._gui_mode.value = "off"
+            except Exception:                                        # noqa: BLE001
+                pass
+
     def step(self) -> None:
+        if self._teleop_cfg is not None:
+            try:
+                self._step_teleop()
+            except Exception as exc:                                 # noqa: BLE001
+                logger.debug("[%s] teleop step failed: %s", self.name, exc)
+
         # Update URDF configs from the latest joint state.
         for arm_key, spec in self._urdfs_spec.items():
             topic = spec.get("state_topic")
@@ -847,4 +1002,6 @@ class ViserMonitorNode(Node):
             "n_chunk_frames":          int(params.get("n_chunk_frames", 10)),
             "chunk_frame_axes_length": float(params.get("chunk_frame_axes_length", 0.03)),
             "chunk_frame_axes_radius": float(params.get("chunk_frame_axes_radius", 0.0025)),
+            "teleop":                  params.get("teleop"),
+            "policy_nodes":            params.get("policy_nodes") or [],
         }

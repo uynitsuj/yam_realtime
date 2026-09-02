@@ -141,6 +141,20 @@ class Session:
 
         self._record_node_names: list[str] = record_node_names or all_node_names
 
+        # Name -> host, so a single node can be paused without pausing the
+        # session. Used by the command-mode arbitration below: exactly one
+        # command source runs at a time.
+        self._host_by_name: dict[str, ProcessHost] = {}
+        for host in self._hosts:
+            for nm in host.node_names:
+                self._host_by_name[nm] = host
+
+        # Command mode. "off" is the session pause (the space bar) and gates
+        # every source at the RobotNode. "policy" and "teleop" both leave the
+        # session running and differ only in WHICH agent is allowed to publish.
+        self._mode: str = "off"
+        self._policy_nodes: list[str] = []
+
         self._bus = MessageBus(pub_port=pub_port, sub_port=sub_port)
 
         self._status: dict[str, NodeStatus] = {
@@ -192,6 +206,9 @@ class Session:
             target=self._monitor_loop, daemon=True, name="SessionMonitor"
         )
         self._monitor_thread.start()
+        # Child -> parent control path (viser pause / command-mode switching).
+        self._start_control_listener()
+        self._publish_state()
 
         if self._auto_record_duration is not None:
             t = threading.Thread(
@@ -315,6 +332,7 @@ class Session:
                 host.pause()
             except Exception:
                 pass
+        self._publish_state()
 
     def resume(self) -> None:
         if not getattr(self, "_is_paused", False):
@@ -327,17 +345,138 @@ class Session:
                 pass
         # Optional: prime recording when the operator unpauses. Lets a policy
         # eval config capture every rollout from the instant of handoff.
+        # Coming back from a space-bar pause, re-apply the per-node gate for
+        # whichever mode was active, so resuming never lets BOTH sources run.
+        if getattr(self, "_mode", "off") == "off":
+            self._mode = "policy"
+        for name in getattr(self, "_policy_nodes", []):
+            self.set_node_paused(name, self._mode != "policy")
         if self._record_on_unpause and not self._is_recording:
             try:
                 self.start_episode()
             except Exception:
                 pass
+        self._publish_state()
 
     def toggle_pause(self) -> None:
         if self.is_paused:
             self.resume()
         else:
             self.pause()
+
+    # ------------------------------------------------------------------
+    # Command-mode arbitration (viser ↔ TUI)
+    #
+    # Nodes run in subprocesses and the control sockets are parent -> child
+    # only, so a node cannot ask the session to pause anything. The session
+    # therefore subscribes to a control topic on the bus it already owns; that
+    # is the child -> parent path. State is published back on `session/state`
+    # so a GUI reflects what actually happened rather than local intent, and
+    # the space bar and a viser control stay in sync by construction.
+    # ------------------------------------------------------------------
+
+    CONTROL_TOPIC = "session/control"
+    STATE_TOPIC = "state"                      # published as session/state
+
+    @property
+    def mode(self) -> str:
+        """'off' | 'teleop' | 'policy'."""
+        return "off" if self.is_paused else getattr(self, "_mode", "off")
+
+    def set_node_paused(self, name: str, paused: bool) -> bool:
+        """Pause/resume ONE node without touching the rest of the session."""
+        host = self._host_by_name.get(name)
+        if host is None:
+            return False
+        try:
+            host.pause() if paused else host.resume()
+        except Exception:
+            return False
+        return True
+
+    def set_mode(self, mode: str, policy_nodes: list[str] | None = None) -> None:
+        """Select which command source may publish.
+
+        off     session paused — every source gated at the RobotNode
+        teleop  session running, policy nodes paused (gizmos drive)
+        policy  session running, policy nodes live
+        """
+        if mode not in ("off", "teleop", "policy"):
+            return
+        if policy_nodes:
+            self._policy_nodes = list(policy_nodes)
+        self._mode = mode
+
+        if mode == "off":
+            self.pause()
+            self._publish_state()
+            return
+
+        # Set per-node gates BEFORE lifting the session gate, so resuming never
+        # opens a window where a stale source commands the arm.
+        for name in self._policy_nodes:
+            self.set_node_paused(name, mode != "policy")
+        if self.is_paused:
+            # Don't let a mode switch trigger record_on_unpause: that is meant
+            # for the operator's deliberate handoff, not for entering teleop.
+            if mode == "teleop":
+                self._is_paused = False
+                for host in self._hosts:
+                    try:
+                        host.resume()
+                    except Exception:
+                        pass
+                for name in self._policy_nodes:
+                    self.set_node_paused(name, True)
+            else:
+                self.resume()
+        self._publish_state()
+
+    def _publish_state(self) -> None:
+        pub = getattr(self, "_state_pub", None)
+        if pub is None:
+            return
+        try:
+            pub.publish(self.STATE_TOPIC, {
+                "paused": self.is_paused,
+                "mode": self.mode,
+                "recording": bool(getattr(self, "_is_recording", False)),
+                "policy_nodes": list(self._policy_nodes),
+            })
+        except Exception:
+            pass
+
+    def _start_control_listener(self) -> None:
+        """Bus subscriber that lets a node drive pause / mode. Best-effort."""
+        from robots_realtime.runtime.transport.publisher import Publisher
+        from robots_realtime.runtime.transport.subscriber import Subscriber
+
+        try:
+            self._state_pub = Publisher("session", port=self._bus.pub_port)
+            sub = Subscriber([self.CONTROL_TOPIC], port=self._bus.sub_port)
+        except Exception:
+            return
+
+        def loop() -> None:
+            seen: float | None = None
+            while not self._stop_event.is_set():
+                try:
+                    msg = sub.get_data(self.CONTROL_TOPIC)
+                    if msg and msg.get("ts") != seen:
+                        seen = msg.get("ts")
+                        act = msg.get("action")
+                        if act == "set_mode":
+                            self.set_mode(msg.get("mode", "off"), msg.get("policy_nodes"))
+                        elif act == "toggle_pause":
+                            self.toggle_pause()
+                            self._publish_state()
+                        elif act == "query":
+                            self._publish_state()
+                except Exception:
+                    pass
+                time.sleep(0.02)
+
+        threading.Thread(target=loop, daemon=True, name="SessionControl").start()
 
     @property
     def log_dir(self) -> Path | None:

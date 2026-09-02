@@ -15,10 +15,13 @@ version: "1"
 #     207B34A158455017 -> can_right  (right follower)
 #   Bring them up with ./scripts/setup_can_yam_bimanual_us05.sh (kernel names
 #   are enumeration-order dependent; the script pins them by serial).
-#   Cameras — three Intel RealSense D405s:
+#   Cameras — three Intel RealSense D405s (re-surveyed on us07 2026-09-01 by
+#   enumerating pyrealsense2 and matching each wrist frame against the
+#   overhead view; the two wrist serials inherited from us05 — 427622271411
+#   and 427622273554 — are NOT present on this machine):
 #     427622273855  top    (overhead)
-#     427622271411  left   (left  arm wrist)
-#     427622273554  right  (right arm wrist)
+#     218722271050  left   (left  arm wrist)
+#     218622275506  right  (right arm wrist)
 #
 # Prereqs:
 #   - `openpi_client` installed in this venv.
@@ -131,6 +134,11 @@ nodes:
     name: yam_left
     robot_config: robot_configs/yam/xdof_hq/left.yaml
     cmd_topic: openpi_policy/left_pos
+    # Second command source: the viser gizmo teleop in the `viz` node below.
+    # RobotNode takes whichever topic is FRESHEST; the session guarantees only
+    # one source publishes at a time, so this needs no mode knowledge here.
+    # A source handover forces the ramp_duration_s ease-in.
+    teleop_cmd_topic: viz/left_pos
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [-0.0235, 1.36242, 0.3495, 0.95763, -0.11537, -0.02913, 1.0]
@@ -141,14 +149,19 @@ nodes:
     name: yam_right
     robot_config: robot_configs/yam/xdof_hq/right.yaml
     cmd_topic: openpi_policy/right_pos
+    teleop_cmd_topic: viz/right_pos
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [0.01732, 1.34234, 0.33567, 0.98454, 0.11514, 0.03717, 1.0]
     startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
-  # Three Intel RealSense D405s — same serials, same roles as
-  # yam_bimanual_viser_teleop_xdof_hq_us05_yam_box_abc.yaml.
+  # Three Intel RealSense D405s. Same ROLES as
+  # yam_bimanual_viser_teleop_xdof_hq_us05_yam_box_abc.yaml, but the two wrist
+  # serials differ — that config's wrist cams live on us05. The left/right
+  # assignment below matches yam_bimanual_act_policy_xdof_hq.yaml and the _jam
+  # configs; note yam_bimanual_openpi_policy_xdof_hq_us05.yaml has these two
+  # swapped and is stale for this station.
   # Swap the device_id values if the physical mounts don't match the labels.
   #
   # NOTE: publish_fov_crop below is 0.88 on the top camera, while the box_abc
@@ -183,7 +196,7 @@ nodes:
   - type: CameraNode
     name: camera_left
     driver: RealSenseCamera
-    device_id: "427622271411"
+    device_id: "218722271050"
     resolution: VGA
     fps: 30
     publish_resize: [224, 224]
@@ -193,18 +206,53 @@ nodes:
   - type: CameraNode
     name: camera_right
     driver: RealSenseCamera
-    device_id: "427622273554"
+    device_id: "218622275506"
     resolution: VGA
     fps: 30
     publish_resize: [224, 224]
     publish_resize_mode: center_crop
     publish_fov_crop: 1.0
 
-  # Live viser monitor — URDF overlays + camera panels, no commands.
+  # Live viser monitor — URDF overlays + camera panels, AND (via `teleop`
+  # below) draggable end-effector gizmos that command the real arms.
+  #
+  # ── Command modes ────────────────────────────────────────────────────────
+  # The "control" folder in the viser GUI selects one of three modes; the
+  # Session arbitrates them and is the single source of truth, so the GUI and
+  # the TUI space bar cannot disagree:
+  #
+  #   off     session paused — EVERY source gated at the RobotNode. Identical
+  #           to pressing [space] in the TUI. The arms hold their last pose.
+  #   teleop  policy agent paused, gizmos drive the arms (once armed).
+  #   policy  gizmos silent, the policy drives; gizmos track the measured arm.
+  #
+  # [space] in the TUI toggles off <-> the previous mode, and the GUI mirrors
+  # whatever the session reports on session/state.
+  #
+  # SAFETY: "gizmos armed" is a separate checkbox that resets to OFF on every
+  # mode change and on any session pause. Entering teleop therefore never moves
+  # the arm; arming re-syncs the gizmos onto the MEASURED pose first (see
+  # YamPyrokiViserAgent.sync_on_start), so the first command is a no-op rather
+  # than a jump to wherever the gizmo was last dragged.
   - type: ViserMonitorNode
     name: viz
     port: 8080
     viz_freq: 20
+    # Nodes the session must pause while teleop drives — i.e. the policy agent.
+    policy_nodes: [openpi_policy]
+    teleop:
+      bimanual: true
+      # Must match the right arm's URDF extrinsic below, or IK targets for the
+      # right arm land 0.61 m from where the gizmo appears.
+      right_arm_extrinsic:
+        position: [0.0, -0.61, 0.0]
+        rotation: [1.0, 0.0, 0.0, 0.0]
+      ik_rate: 100.0
+      # Conservative for a browser-driven real arm; raise once it feels right.
+      max_joint_speed: 1.0
+      max_gripper_speed: 4.0
+      smoothing_tau_s: 0.05
+      sync_on_start: true
     # Frames from openpi_policy/image/* are already 224×224 (center-cropped by
     # the agent). Match preview to the same square so resize_with_pad is a
     # no-op — otherwise it letterboxes with black bars.

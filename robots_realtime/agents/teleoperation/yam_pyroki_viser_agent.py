@@ -105,6 +105,8 @@ class YamPyrokiViserAgent(Agent):
         smoothing_tau_s: float = 0.03,
         viz_period_s: float = 0.05,
         preview_size: int = 224,
+        viser_server: Optional["viser.ViserServer"] = None,
+        armed: bool = True,
     ) -> None:
         self.bimanual = bimanual
         self.right_arm_extrinsic = right_arm_extrinsic
@@ -126,7 +128,14 @@ class YamPyrokiViserAgent(Agent):
 
         self._max_joint_speed_init = float(max_joint_speed)
 
-        self.viser_server = viser.ViserServer(port=viser_port)
+        # An injected server lets this agent share ONE viser page with another
+        # node's scene (e.g. ViserMonitorNode's URDF + camera panels) instead of
+        # serving a second port. viser handles are namespaced by path, so the
+        # two scenes coexist.
+        self.viser_server = viser_server if viser_server is not None else viser.ViserServer(port=viser_port)
+        # Safety gate: while disarmed act() holds the measured pose, so entering
+        # teleop never moves the arm until the operator explicitly arms it.
+        self._armed = bool(armed)
         self.ik = YamPyroki(rate=ik_rate, viser_server=self.viser_server, bimanual=bimanual)
 
         # Private URDF instance for FK during gizmo syncing — mutating the one
@@ -299,12 +308,22 @@ class YamPyrokiViserAgent(Agent):
 
     # ── Agent interface ────────────────────────────────────────────────────────
 
+    def set_armed(self, armed: bool) -> None:
+        """Arm/disarm command output. Disarming also re-syncs the gizmos, so
+        re-arming starts from wherever the arm actually is rather than from a
+        setpoint the operator may have dragged while disarmed."""
+        armed = bool(armed)
+        if armed and not self._armed:
+            self._sync_pending = True
+        self._armed = armed
+
     def act(self, obs: Dict[str, Any]) -> Dict[str, Dict[str, np.ndarray]]:
         self.obs = obs
 
         # Hold position until the startup sync has landed, otherwise the first
-        # commands would drive toward the gizmos' canned spawn pose.
-        if self._sync_pending:
+        # commands would drive toward the gizmos' canned spawn pose. Disarmed
+        # behaves identically: hold measured, publish nothing new.
+        if self._sync_pending or not self._armed:
             action = {}
             for arm in self.arms:
                 joints = self._measured_joints(arm)

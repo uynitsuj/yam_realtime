@@ -177,6 +177,18 @@ class AgentNode(Node):
                     record=False,
                 )
 
+        # A paused agent must not command. RobotNode already gates its own
+        # output on the session pause, but that is not sufficient once a config
+        # carries MORE THAN ONE command source (e.g. the policy agent plus the
+        # viser gizmo teleop in the us07 policy config): the session pauses one
+        # source and resumes the other, and both publish to their own topics.
+        # Without this gate the paused source keeps publishing and whichever
+        # wrote most recently wins at the RobotNode — the two sources fight.
+        # Observations, chunk snapshots and image mirrors above stay live so the
+        # monitor keeps rendering while paused.
+        if self._paused:
+            return
+
         self._publish_commands(action, ts)
 
     def _publish_commands(self, action: dict, ts: float) -> None:

@@ -91,6 +91,7 @@ class RobotNode(Node):
         robot=None,
         name: str = "robot",
         cmd_topic: str | None = None,
+        teleop_cmd_topic: str | None = None,
         robot_config: str | None = None,
         poll_freq: float | None = None,
         startup_joint_pos: list[float] | None = None,
@@ -105,7 +106,7 @@ class RobotNode(Node):
         writer=None,
         **kwargs,
     ) -> None:
-        self.subscribed_topics = [cmd_topic] if cmd_topic else []
+        self.subscribed_topics = [t for t in (cmd_topic, teleop_cmd_topic) if t]
         # Explicitly set poll_freq and subscriber_driven before calling super().__init__
         if poll_freq is not None:
             self.poll_freq = poll_freq
@@ -113,6 +114,10 @@ class RobotNode(Node):
         super().__init__(name=name, writer=writer, **kwargs)
         self._robot = robot
         self._cmd_topic = cmd_topic
+        # Optional second command source (viser gizmo teleop). Resolved against
+        # cmd_topic by timestamp in step(); see the note there.
+        self._teleop_cmd_topic = teleop_cmd_topic
+        self._active_cmd_topic: str | None = None
         self._robot_config = robot_config  # stored for reference; instantiation is caller's job
         self._startup_joint_pos = startup_joint_pos
         self._startup_duration_s = startup_duration_s
@@ -250,9 +255,29 @@ class RobotNode(Node):
         cmd_ts: float | None = None
         is_new = False
 
-        if self._cmd_topic:
-            cmd = self.get_latest(self._cmd_topic)
-            cmd_ts = self.get_timestamp(self._cmd_topic) if cmd is not None else None
+        # Two command sources may be configured (e.g. the policy agent and the
+        # viser gizmo teleop). Exactly one is ever publishing — the session
+        # pauses the other, and AgentNode/ViserMonitorNode gate their own output
+        # — so "freshest timestamp wins" resolves them without this node needing
+        # to know anything about modes.
+        active_topic = self._cmd_topic
+        if self._teleop_cmd_topic:
+            t_pol = self.get_timestamp(self._cmd_topic) if self._cmd_topic else None
+            t_tel = self.get_timestamp(self._teleop_cmd_topic)
+            if t_tel is not None and (t_pol is None or t_tel > t_pol):
+                active_topic = self._teleop_cmd_topic
+        if active_topic != self._active_cmd_topic:
+            # Source handover: force the ramp so the arm eases onto the new
+            # source's setpoint instead of stepping to it. Timestamps from two
+            # publishers are not ordered, so the resume-gap test below cannot be
+            # relied on to catch this.
+            if self._active_cmd_topic is not None:
+                self._last_msg_ts = 0.0
+            self._active_cmd_topic = active_topic
+
+        if active_topic:
+            cmd = self.get_latest(active_topic)
+            cmd_ts = self.get_timestamp(active_topic) if cmd is not None else None
             if cmd is not None:
                 # End-to-end latency from the agent's publish timestamp to this
                 # poll consuming the command. Captures CAN freshness + publish +
@@ -353,6 +378,7 @@ class RobotNode(Node):
         kwargs = {
             "name": params["name"],
             "cmd_topic": params.get("cmd_topic"),
+            "teleop_cmd_topic": params.get("teleop_cmd_topic"),
             "robot_config": params.get("robot_config"),
         }
         # Pass through poll_freq if specified

@@ -1,0 +1,15 @@
+# Top-camera extrinsics, CAMERA->WORLD in the robot base frame.
+#
+# position:    [x, y, z] metres, camera origin in the base frame
+# rpy_radians: [roll, pitch, yaw], consumed via SO3.from_rpy_radians
+#
+# Plane-constrained solve (roll/pitch/height from the measured table normal, 200k depth pts) PLUS a manual in-plane nudge dxyz=(-0.122,-0.026,+0.024) m verified by eye in scripts/verify_top_cam_extrinsics.py (rotation sliders at 0). Justin, 2026-09-01.
+
+position:
+- -0.16353540080869944
+- -0.31043106554608424
+- 0.9242199488849039
+rpy_radians:
+- -2.597760197287671
+- 0.00600015225605441
+- -1.6348694400467874
