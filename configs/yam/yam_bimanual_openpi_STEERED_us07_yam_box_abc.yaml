@@ -1,5 +1,30 @@
 version: "1"
 
+# STEERED variant of yam_bimanual_openpi_policy_xdof_hq_us07_yam_box_abc.yaml.
+#
+# Identical hardware/camera/URDF wiring; the ONLY differences are the agent class
+# (FkSteeredAgent instead of AsyncDiffusionAgent), its steering kwargs, and an
+# `anchor` state topic. Kept as a separate file so the known-good policy config
+# is never the thing being experimented on.
+#
+# HOW TO RUN A STEERED ROLLOUT
+# ----------------------------
+#   1. With the session STOPPED (grounding needs the top camera to itself):
+#        ./.venv-vlm/bin/python scripts/anchor_command.py ground --command "green bottles only"
+#      -> writes out/anchors.json (base-frame anchors) + out/anchors.png overlay.
+#      CHECK THE OVERLAY before continuing: a wrong anchor steers the arm at the
+#      wrong thing, and nothing downstream can catch that.
+#
+#   2. Start this session. It comes up start_paused; hit [space] to hand over.
+#
+#   3. In another terminal:
+#        uv run scripts/anchor_command.py publish
+#      Publishes one anchor at a time on anchor_cmd/point, advancing when the
+#      commanded arm's gripper closes near it (ENTER to skip).
+#
+# Set steer_mode: dryrun below to score candidates and LOG what selection would
+# pick while executing candidate 0 — same rollout, no influence on the arm.
+#
 # Bimanual YAM policy deployment via an external OpenPI websocket inference server.
 # The policy agent runs inference on a background thread (inference_mode: async = flat-out);
 # AgentNode's consumer calls act() at poll_freq and dequeues one action per tick from the
@@ -48,7 +73,7 @@ session:
 nodes:
   - type: AgentNode
     name: openpi_policy
-    agent_class: robots_realtime.agents.policy_learning.async_pi0_agent:AsyncDiffusionAgent
+    agent_class: robots_realtime.agents.policy_learning.fk_steered_agent:FkSteeredAgent
     #
     # ── FK-objective steering (anchor P0) ────────────────────────────────────
     # Swap the agent_class above for the line below to enable point-prompt
@@ -151,9 +176,23 @@ nodes:
       # black bars which are OOD for the model → erratic actions.
       image_preprocess: center_crop             # center_crop | pad
       use_joint_state_as_action: false
+      # ── FK-objective steering ─────────────────────────────────────────────
+      # QUOTED deliberately: YAML 1.1 parses bare on/off as BOOLEANS.
+      steer_mode: "on"                  # "off" | "dryrun" | "on"
+      n_candidates: 16                  # 413 ms — fits the 500 ms chunk budget
+      n_candidates_first: 32            # 800 ms; the arm is still ~stationary
+      first_chunks: 2                   # for the first couple of decisions
+      right_base_offset: [0.0, -0.61, 0.0]   # matches the viz URDF extrinsic
+      arm_gate_band: 0.10               # |y - midline| beyond this scores one arm
+      release_at_grasp: true
+      release_radius_m: 0.12
+      steer_seed: 0                     # hold K and seed fixed within a comparison
     state_topics:
       left:  yam_left/joint_state       # flatten → left-joint_pos, left-gripper_pos
       right: yam_right/joint_state
+      # Commanded 3-D anchor, {"point": [x, y, z]} in the LEFT-ARM BASE frame,
+      # published by scripts/anchor_command.py. No anchor => unsteered inference.
+      anchor: anchor_cmd/point
     image_topics:
       left_camera:  camera_left/rgb     # flatten → left_camera-images-rgb
       right_camera: camera_right/rgb
