@@ -44,8 +44,9 @@ version: "1"
 #   arms back under policy control.
 #
 #   Button map (see dagger_intervention_agent.py for how the bits are decoded):
-#     index 0 = digital_inputs bit 0 = TOP    = YELLOW = takeover / hand back
-#     index 1 = digital_inputs bit 1 = LOWER  = WHITE  = episode start / end+save
+#     either TOP/YELLOW = takeover / hand back
+#     left LOWER/WHITE  = episode start / end+save+home
+#     right LOWER/WHITE = session play / pause (same as TUI [space])
 # The TUI still works throughout: [r] saves the episode and requests homing,
 # [d] discards the current episode, [space] re-pauses, [q] quits.
 #
@@ -74,7 +75,7 @@ session:
   save_root: recordings/dagger/{policy_name}
   # start_paused: RobotNode commands are gated on startup so the arms don't snap
   # to wherever the policy thinks they should be. Set up the scene while gated,
-  # then hit [space] to hand the arms to the policy.
+  # then hit [space] or right LOWER/WHITE to hand the arms to the policy.
   start_paused: true
   # Session's own record_on_unpause MUST stay false — the dagger node replaces
   # it (its own record_on_unpause kwarg, on by default) so that ONE thing owns
@@ -89,8 +90,11 @@ session:
   #                                        begins driving, so recording has to
   #                                        start here or the rollout loses its head)
   #   [space] pause    → episode ends + saves
-  #   WHITE button     → toggle an episode without touching pause
+  #   left WHITE button → toggle an episode without touching pause
   record_topic: dagger/record
+  # One-shot hardware equivalent of the TUI space bar, emitted by the DAgger
+  # node from the right GELLO lower button.
+  pause_toggle_topic: dagger/pause_toggle
   # Backstop only. On expiry Session ends the episode and re-pauses; the dagger
   # node sees that pause edge and drops its latch to match, so the next [space]
   # cleanly starts a fresh episode with no stray press needed.
@@ -139,7 +143,7 @@ nodes:
     agent_kwargs:
       ip: 127.0.0.1
       port: 8012
-      action_horizon: 20
+      action_horizon: 15
       inference_mode: sync                 # sync | async | async_rate_limited | async_rtc | temporal_ensemble
       # inference_interval_s: 0.7                 # rate cap in seconds (None = flat-out async)
       # min_smoothed_actions: 1                 # only meaningful for async / async_rate_limited
@@ -204,6 +208,17 @@ nodes:
       button_debounce_s: 0.02
       # Must match the passive-gello teleop config for this station.
       joint_signs: [-1, -1, 1, 1, -1, -1]
+      # One station-level source of truth for the physical follower limits. The
+      # DAgger IK stays another 0.1 rad inside these bounds, matching Market42's
+      # solver constraint plus explicit post-solve guard pattern.
+      joint_limits: &dagger_follower_joint_limits
+        - [-2.09, 3.14]
+        - [0.00, 3.14]
+        - [0.05, 3.14]
+        - [-1.35, 1.35]
+        - [-1.50, 1.50]
+        - [-2.00, 2.00]
+      joint_limit_margin: 0.10
       include_gripper: true
       # YELLOW, the top button. Takeover gets the yellow one because it's the
       # action used most within a rollout and a mispress is cheap — press again
@@ -215,6 +230,11 @@ nodes:
       # disable and drive recording from the TUI only.
       episode_button_index: 1     # bit 1 = lower = white
       episode_button_arm: left     # only the left GELLO can end/start episodes
+      # The same physical lower switch on the right GELLO toggles the Session
+      # pause gate. Pausing ends+saves the active episode; resuming starts a new
+      # episode and hands the arms back to the policy, exactly like TUI [space].
+      pause_button_index: 1
+      pause_button_arm: right
       # Start an episode on unpause and end it on pause. This replaces Session's
       # own record_on_unpause (which must stay false above) so that exactly one
       # thing owns episode boundaries.
@@ -227,6 +247,10 @@ nodes:
       # MUST match the RobotNodes' startup_joint_pos below — the agent has no way
       # to read that off them, so the pose is unfortunately stated twice. If you
       # change one, change the other.
+      # Median frame-0 follower poses from siemens_simple_d405_v4, converted
+      # from the dataset's flipped joint order into physical motor order:
+      # left:  [0.0170, 1.5188, 0.2478, 1.1713, -0.1822, -0.1001, 1.0]
+      # right: [0.0467, 1.4975, 0.2386, 1.1568, 0.1677, 0.0303, 1.0]
       home_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
       home_on_episode_end: true
       # Gentler than max_joint_speed: this motion runs unattended while the
@@ -280,6 +304,7 @@ nodes:
     robot_config: robot_configs/yam/xdof_hq/left.yaml
     # Station/policy-specific controller tuning; overrides the shared robot YAML.
     robot_config_overrides:
+      joint_limits: *dagger_follower_joint_limits
       # Match Market42 by including the linear 4310 gripper mass in the
       # MuJoCo dynamics model; the arm-only XML makes link_6 nearly massless.
       xml_path:
@@ -292,7 +317,8 @@ nodes:
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [-0.0235, 1.36242, 0.3495, 0.95763, -0.11537, -0.02913, 1.0]
-    startup_joint_pos: [0.0, 0.4 , 0.35, 0.35, 0.0, 0.0, 1.0]
+    # v4 median: [0.0170, 1.5188, 0.2478, 1.1713, -0.1822, -0.1001, 1.0]
+    startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
   - type: RobotNode
@@ -300,6 +326,7 @@ nodes:
     robot_config: robot_configs/yam/xdof_hq/right.yaml
     # Keep both follower arms on the same station-specific gravity model.
     robot_config_overrides:
+      joint_limits: *dagger_follower_joint_limits
       # Match Market42 by including the linear 4310 gripper mass in the
       # MuJoCo dynamics model; the arm-only XML makes link_6 nearly massless.
       xml_path:
@@ -312,6 +339,7 @@ nodes:
     poll_freq: 200
     ramp_duration_s: 1.5
     # startup_joint_pos: [0.01732, 1.34234, 0.33567, 0.98454, 0.11514, 0.03717, 1.0]
+    # v4 median: [0.0467, 1.4975, 0.2386, 1.1568, 0.1677, 0.0303, 1.0]
     startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 

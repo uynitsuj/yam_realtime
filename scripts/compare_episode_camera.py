@@ -102,6 +102,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--move-duration", type=float, default=2.0, help="Seconds to interpolate to target pose")
     p.add_argument("--no-robot", action="store_true", help="Disable robot control (browse-only)")
     p.add_argument(
+        "--public-read-only",
+        action="store_true",
+        help=(
+            "Expose the webpage and embedded Viser to the public internet with Tailscale Funnel. "
+            "Robot-motion controls are disabled. Uses public HTTPS ports 443 and 8443."
+        ),
+    )
+    p.add_argument(
         "--fov-crop",
         type=float,
         default=None,
@@ -123,6 +131,69 @@ def parse_args() -> argparse.Namespace:
     if args.viser_port == args.port:
         p.error("--viser-port must differ from --port")
     return args
+
+
+
+def start_public_funnels(web_port: int, viser_port: int) -> list[subprocess.Popen[bytes]]:
+    """Expose both viewer servers until the returned Funnel processes are stopped."""
+    status_result = subprocess.run(
+        ["tailscale", "funnel", "status", "--json"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if status_result.returncode != 0:
+        detail = status_result.stderr.strip() or status_result.stdout.strip()
+        raise RuntimeError(f"Unable to inspect existing Tailscale Funnel configuration: {detail}")
+    try:
+        existing = json.loads(status_result.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Tailscale returned invalid Funnel status JSON") from exc
+    if existing:
+        raise RuntimeError(
+            "This host already has a Tailscale Funnel configuration; refusing to overwrite it. "
+            "Run tailscale funnel status to inspect it."
+        )
+
+    processes: list[subprocess.Popen[bytes]] = []
+    try:
+        for public_port, local_port, label in (
+            (443, web_port, "comparison webpage"),
+            (8443, viser_port, "embedded Viser"),
+        ):
+            command = [
+                "tailscale",
+                "funnel",
+                "--yes",
+                f"--https={public_port}",
+                f"http://127.0.0.1:{local_port}",
+            ]
+            print(f"Publishing public read-only {label} on HTTPS port {public_port} ...")
+            process = subprocess.Popen(command)
+            processes.append(process)
+            time.sleep(0.75)
+            return_code = process.poll()
+            if return_code is not None:
+                raise RuntimeError(f"Tailscale Funnel for {label} exited with status {return_code}")
+    except BaseException:
+        stop_public_funnels(processes)
+        raise
+    return processes
+
+
+def stop_public_funnels(processes: list[subprocess.Popen[bytes]]) -> None:
+    """Stop only Funnel processes launched by this viewer."""
+    for process in processes:
+        if process.poll() is None:
+            process.terminate()
+    for process in processes:
+        if process.poll() is not None:
+            continue
+        try:
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2.0)
 
 
 def s3_cp(s3_uri: str, local_path: str) -> bool:
@@ -757,16 +828,17 @@ button,input{background:#1d2129;color:#d7dae0;border:1px solid #3a404d;border-ra
 <header><strong>Live ↔ LeRobot + URDF</strong><button id="prev-ep">◀ episode</button><input id="episode" type="range" min="0" step="1"><span id="episode-label"></span><button id="next-ep">episode ▶</button><button id="prev-frame">◀ frame</button><input id="frame" type="range" min="0" step="1"><span id="frame-label"></span><button id="next-frame">frame ▶</button><button id="move" style="border-color:#c44;color:#ff8b8b">Move robot</button><span id="status" class="muted"></span></header>
 <div class="workspace"><section id="camera-side"><div class="camera-toolbar"><label><input id="overlay" type="checkbox"> overlay cameras</label><span class="muted">dataset opacity</span><input id="opacity" type="range" min="0" max="1" step=".01"><span id="opacity-label"></span><span class="muted">top live FOV</span><input id="fov" type="range" min=".5" max="1" step=".01"><span id="fov-label"></span></div><main id="rows"></main></section><section id="viser-side"><div class="viser-title">URDF overlay — <span class="blue">blue dataset</span> / <span class="orange">orange live</span></div><iframe id="viser" src=""></iframe></section></div>
 <script>
-const byId=id=>document.getElementById(id);let state=null,selectTimer=null,fovTimer=null;
+const byId=id=>document.getElementById(id);let state=null,selectTimer=null,fovTimer=null,selectionToken=0,pendingSelection=null;
 function setOpacity(v){v=Math.max(0,Math.min(1,Number(v)));byId("opacity").value=v;byId("opacity-label").textContent=v.toFixed(2);document.documentElement.style.setProperty("--opacity",v)}
 function build(){byId("rows").innerHTML=state.views.map(view=>"<section class='compare' id='compare-"+view+"'><h2>"+view+"</h2><div class='pane live'><span class='tag'>live</span><img src='/live/"+view+".mjpg'></div><div class='pane dataset'><span class='tag'>dataset</span><img id='dataset-"+view+"'></div></section>").join("");}
 function render(){byId("episode").max=state.episode_max;byId("episode").value=state.episode;byId("episode-label").textContent=state.episode+" / "+state.episode_max;byId("frame").max=Math.max(0,state.frame_count-1);byId("frame").value=state.frame;byId("frame-label").textContent=state.frame+" / "+Math.max(0,state.frame_count-1)+" ("+state.time_s.toFixed(2)+"s)";const prep=state.camera_preprocess.top||state.camera_preprocess[state.views[0]]||{};if(document.activeElement!==byId("fov")){byId("fov").value=prep.fov_crop||1;byId("fov-label").textContent=Number(prep.fov_crop||1).toFixed(2)}byId("status").textContent=(state.robot_ready?"robot ready":"viewer only")+" · dataset joints "+(state.dataset_flip_joint_order?"flipped":"native")+" · video "+(prep.resize_mode||"native")+" · top fov "+Number(prep.fov_crop||1).toFixed(2);for(const view of state.views)byId("dataset-"+view).src="/dataset/"+view+".jpg?r="+state.revision;}
-async function refresh(){state=await(await fetch("/api/state")).json();render()}
-async function select(episode,frame){await fetch("/api/select?episode="+episode+"&frame="+frame,{method:"POST"});setTimeout(refresh,80)}
-function schedule(){clearTimeout(selectTimer);selectTimer=setTimeout(()=>select(Number(byId("episode").value),Number(byId("frame").value)),80)}
-(async()=>{state=await(await fetch("/api/state")).json();build();setOpacity(state.opacity);byId("viser").src=location.protocol+"//"+location.hostname+":"+state.viser_port;render();setInterval(refresh,1000)})();
+function acceptState(next){if(state&&next.revision<state.revision)return false;if(pendingSelection&&(next.episode!==pendingSelection.episode||next.frame!==pendingSelection.frame||next.revision<=pendingSelection.afterRevision))return false;state=next;if(pendingSelection)pendingSelection=null;render();return true}
+async function refresh(){const next=await(await fetch("/api/state",{cache:"no-store"})).json();acceptState(next)}
+async function select(episode,frame){clearTimeout(selectTimer);episode=Number(episode);frame=Number(frame);const mine=++selectionToken;pendingSelection={episode,frame,afterRevision:state.revision};byId("episode").value=episode;byId("frame").value=frame;byId("episode-label").textContent=episode+" / "+state.episode_max;byId("frame-label").textContent=frame+" / "+Math.max(0,state.frame_count-1)+" (loading...)";await fetch("/api/select?episode="+episode+"&frame="+frame,{method:"POST"});while(mine===selectionToken&&pendingSelection){await new Promise(resolve=>setTimeout(resolve,50));await refresh()}}
+function schedule(){clearTimeout(selectTimer);const episode=Number(byId("episode").value),frame=Number(byId("frame").value);pendingSelection={episode,frame,afterRevision:state.revision};selectTimer=setTimeout(()=>select(episode,frame),80)}
+(async()=>{state=await(await fetch("/api/state",{cache:"no-store"})).json();build();setOpacity(state.opacity);const viserPort=state.public_read_only&&location.protocol==="https:"?state.public_viser_port:state.viser_port;byId("viser").src=location.protocol+"//"+location.hostname+":"+viserPort;byId("move").hidden=state.public_read_only;render();setInterval(refresh,1000)})();
 byId("episode").oninput=e=>{byId("episode-label").textContent=e.target.value+" / "+state.episode_max};byId("episode").onchange=()=>select(Number(byId("episode").value),0);byId("frame").oninput=e=>{byId("frame-label").textContent=e.target.value+" / "+Math.max(0,state.frame_count-1);schedule()};
-byId("prev-ep").onclick=()=>select(Math.max(0,state.episode-1),0);byId("next-ep").onclick=()=>select(Math.min(state.episode_max,state.episode+1),0);byId("prev-frame").onclick=()=>select(state.episode,Math.max(0,state.frame-1));byId("next-frame").onclick=()=>select(state.episode,Math.min(state.frame_count-1,state.frame+1));
+byId("prev-ep").onclick=()=>select(Math.max(0,Number(byId("episode").value)-1),0);byId("next-ep").onclick=()=>select(Math.min(state.episode_max,Number(byId("episode").value)+1),0);byId("prev-frame").onclick=()=>select(Number(byId("episode").value),Math.max(0,Number(byId("frame").value)-1));byId("next-frame").onclick=()=>select(Number(byId("episode").value),Math.min(Number(byId("frame").max),Number(byId("frame").value)+1));
 byId("move").onclick=()=>fetch("/api/move",{method:"POST"});byId("opacity").oninput=e=>setOpacity(e.target.value);byId("overlay").onchange=e=>document.querySelectorAll(".compare").forEach(row=>row.classList.toggle("overlay",e.target.checked));
 byId("fov").oninput=e=>{const v=Number(e.target.value);byId("fov-label").textContent=v.toFixed(2);clearTimeout(fovTimer);fovTimer=setTimeout(()=>fetch("/api/fov?value="+v,{method:"POST"}),40)};
 </script></body></html>"""
@@ -781,6 +853,7 @@ def make_comparison_app(
     fps: float,
     viser_port: int,
     opacity: float,
+    public_read_only: bool = False,
 ) -> Any:
     from fastapi import FastAPI, HTTPException  # noqa: PLC0415
     from fastapi.responses import HTMLResponse, Response, StreamingResponse  # noqa: PLC0415
@@ -804,6 +877,8 @@ def make_comparison_app(
             "camera_preprocess": current.get("camera_preprocess", {}),
             "robot_config_overrides": current.get("robot_config_overrides", {}),
             "viser_port": viser_port,
+            "public_viser_port": 8443,
+            "public_read_only": public_read_only,
             "opacity": opacity,
         }
 
@@ -814,6 +889,8 @@ def make_comparison_app(
         return {"accepted": True}
 
     async def api_move() -> dict:
+        if public_read_only:
+            raise HTTPException(403, "Robot motion is disabled in public read-only mode")
         request_queue.put(("move", int(current["episode_idx"]), int(current["frame_idx"])))
         return {"accepted": True}
 
@@ -1131,7 +1208,12 @@ def main() -> None:
         move_button = server.gui.add_button(
             "Move robot to displayed frame",
             color="red",
-            hint="Commands both physical YAM arms to the selected dataset state.",
+            disabled=args.public_read_only,
+            hint=(
+                "Disabled while public read-only access is enabled."
+                if args.public_read_only
+                else "Commands both physical YAM arms to the selected dataset state."
+            ),
         )
         server.gui.add_markdown(
             "**URDF overlay:** dataset pose is blue; live measured pose is orange. "
@@ -1170,7 +1252,7 @@ def main() -> None:
 
     @move_button.on_click
     def _move_to_frame(_event: Any) -> None:
-        if getattr(_event, "client_id", None) is None:
+        if args.public_read_only or getattr(_event, "client_id", None) is None:
             return
         request_queue.put(("move", int(current["episode_idx"]), int(current["frame_idx"])))
 
@@ -1231,6 +1313,7 @@ def main() -> None:
         fps,
         args.viser_port,
         args.opacity,
+        args.public_read_only,
     )
     web_server = uvicorn.Server(uvicorn.Config(web_app, host=args.host, port=args.port, log_level="warning"))
     web_thread = threading.Thread(target=web_server.run, name="comparison-web", daemon=True)
@@ -1295,15 +1378,20 @@ def main() -> None:
         current["robot_ready"] = ready
         print("Robot control ready" if ready else "Robot control unavailable")
 
+    funnel_processes: list[subprocess.Popen[bytes]] = []
     last_live_update = 0.0
     try:
+        if args.public_read_only:
+            funnel_processes = start_public_funnels(args.port, args.viser_port)
+            print("Public read-only access enabled; Funnel URLs are shown above.")
         while not shutdown_requested.is_set():
             try:
                 while True:
                     kind, first, second = request_queue.get_nowait()
                     if kind == "select":
                         nearest = min(episode_ids, key=lambda value: abs(value - first))
-                        _load_episode(episode_ids.index(nearest))
+                        if nearest != int(current["episode_idx"]):
+                            _load_episode(episode_ids.index(nearest))
                         _load_frame(second)
                         episode_slider.value = nearest
                         _replace_frame_slider()
@@ -1361,6 +1449,9 @@ def main() -> None:
     except KeyboardInterrupt:
         print("Stopping viewer")
     finally:
+        if funnel_processes:
+            print("Stopping public Tailscale Funnel routes ...")
+            stop_public_funnels(funnel_processes)
         robots_to_zero = {
             side: robot for side, robot in (("left", left_robot), ("right", right_robot)) if robot is not None
         }

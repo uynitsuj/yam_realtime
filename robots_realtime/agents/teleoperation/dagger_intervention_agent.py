@@ -211,6 +211,11 @@ class DaggerInterventionAgent(Agent):
                        ``takeover_button_index``.
         episode_button_arm: Limit the episode button to ``left`` or ``right``;
                        None accepts it from either leader.
+        pause_button_index: Which leader button toggles the Session pause gate,
+                       or None to disable. The configured arm/index pair must
+                       not overlap the episode-button mapping.
+        pause_button_arm: Limit the pause button to ``left`` or ``right``;
+                       None accepts it from either leader.
         record_on_unpause: Start an episode on the paused→unpaused edge and end
                        it on the unpaused→paused edge. On by default, because
                        unpausing hands the arms to the policy and a rollout that
@@ -233,6 +238,11 @@ class DaggerInterventionAgent(Agent):
                        can be gentler than live teleop.
         home_tol_rad:  Per-joint tolerance for declaring home reached and
                        switching from HOMING to IDLE.
+        joint_limits:   Optional motor-order ``[[lower, upper], ...]`` limits
+                       for the six follower arm joints. When provided, these
+                       replace the wider URDF limits used by follower IK.
+        joint_limit_margin: Symmetric soft margin inside ``joint_limits``.
+                       Seeds and final IK results are explicitly guarded too.
         urdf_path:     YAM URDF used for both leader FK and follower FK/IK.
         handback_blend_s: Duration of the joint-space blend from the operator's
                        final pose to the policy command.
@@ -285,11 +295,15 @@ class DaggerInterventionAgent(Agent):
         takeover_button_index: int = BUTTON_YELLOW_TOP,
         episode_button_index: Optional[int] = BUTTON_WHITE_LOWER,
         episode_button_arm: Optional[str] = None,
+        pause_button_index: Optional[int] = None,
+        pause_button_arm: Optional[str] = None,
         record_on_unpause: bool = True,
         home_joint_pos: Optional[Any] = None,
         home_on_episode_end: bool = True,
         homing_max_joint_speed: float = 1.0,
         home_tol_rad: float = 0.03,
+        joint_limits: Optional[Any] = None,
+        joint_limit_margin: float = 0.0,
         urdf_path: str = DEFAULT_URDF,
         handback_blend_s: float = 1.0,
         handback_fresh_timeout_s: float = 1.5,
@@ -321,6 +335,22 @@ class DaggerInterventionAgent(Agent):
             raise ValueError(
                 f"episode_button_arm must be left, right or null, got {episode_button_arm!r}"
             )
+        if pause_button_index is not None and pause_button_index not in (0, 1):
+            raise ValueError(f"pause_button_index must be 0, 1 or null, got {pause_button_index}")
+        if pause_button_arm not in (None, "left", "right"):
+            raise ValueError(
+                f"pause_button_arm must be left, right or null, got {pause_button_arm!r}"
+            )
+        if pause_button_index is not None and pause_button_index == episode_button_index:
+            mappings_overlap = (
+                pause_button_arm is None
+                or episode_button_arm is None
+                or pause_button_arm == episode_button_arm
+            )
+            if mappings_overlap:
+                raise ValueError(
+                    "pause and episode buttons overlap; use different indices or distinct arms"
+                )
 
         self.arms = ["left", "right"]
         self._button_index = int(takeover_button_index)
@@ -328,6 +358,10 @@ class DaggerInterventionAgent(Agent):
             None if episode_button_index is None else int(episode_button_index)
         )
         self._episode_button_arm = episode_button_arm
+        self._pause_button_index = (
+            None if pause_button_index is None else int(pause_button_index)
+        )
+        self._pause_button_arm = pause_button_arm
         self._handback_blend_s = float(handback_blend_s)
         self._handback_fresh_timeout_s = float(handback_fresh_timeout_s)
         self._max_joint_speed = float(max_joint_speed)
@@ -347,6 +381,7 @@ class DaggerInterventionAgent(Agent):
         self._home_on_episode_end = bool(home_on_episode_end)
         self._homing_speed = float(homing_max_joint_speed)
         self._home_tol = float(home_tol_rad)
+        self._joint_guards = self._parse_joint_limits(joint_limits, joint_limit_margin)
         self._home = self._parse_home(home_joint_pos)
         if self._home_on_episode_end and self._home is None:
             raise ValueError(
@@ -390,6 +425,7 @@ class DaggerInterventionAgent(Agent):
         # so sharing one would make leader FK clobber follower FK mid-tick.
         self._urdf_lead = yourdfpy.URDF.load(urdf_path, load_meshes=False, build_scene_graph=True)
         self._urdf_fol = yourdfpy.URDF.load(urdf_path, load_meshes=False, build_scene_graph=True)
+        self._apply_ik_joint_limits(self._urdf_fol)
         self._robot = pk.Robot.from_urdf(self._urdf_fol)
         self._tcp_offset = vtf.SE3.from_rotation_and_translation(
             vtf.SO3.identity(), np.asarray(TCP_OFFSET_POS, dtype=np.float64)
@@ -473,6 +509,46 @@ class DaggerInterventionAgent(Agent):
                 )
         return per_arm
 
+
+    def _parse_joint_limits(self, limits: Any, margin: float) -> Optional[np.ndarray]:
+        """Return guarded six-joint limits in physical motor order."""
+        margin = float(margin)
+        if margin < 0.0:
+            raise ValueError(f"joint_limit_margin must be non-negative, got {margin}")
+        if limits is None:
+            return None
+        raw = np.asarray(limits, dtype=np.float64)
+        if raw.shape != (ARM_DOF, 2):
+            raise ValueError(f"joint_limits must have shape ({ARM_DOF}, 2), got {raw.shape}")
+        if not np.all(np.isfinite(raw)) or np.any(raw[:, 0] >= raw[:, 1]):
+            raise ValueError("joint_limits must contain finite lower < upper pairs")
+        guarded = raw.copy()
+        guarded[:, 0] += margin
+        guarded[:, 1] -= margin
+        if np.any(guarded[:, 0] >= guarded[:, 1]):
+            raise ValueError("joint_limit_margin leaves one or more joints with no valid range")
+        return guarded
+
+    def _apply_ik_joint_limits(self, urdf: Any) -> None:
+        """Install motor-order follower guards into the reversed-order YAM URDF."""
+        if self._joint_guards is None:
+            return
+        by_name = {joint.name: joint for joint in urdf.robot.joints}
+        for motor_idx, (lower, upper) in enumerate(self._joint_guards):
+            name = f"joint{motor_idx + 1}"
+            joint = by_name.get(name)
+            if joint is None or joint.limit is None:
+                raise ValueError(f"Cannot apply follower limit: {name} is missing from the IK URDF")
+            joint.limit.lower = float(lower)
+            joint.limit.upper = float(upper)
+
+    def _guard_arm_joints(self, joints: np.ndarray) -> np.ndarray:
+        """Clamp one motor-order IK vector to the configured soft guards."""
+        q = np.asarray(joints, dtype=np.float64).reshape(ARM_DOF).copy()
+        if self._joint_guards is not None:
+            q = np.clip(q, self._joint_guards[:, 0], self._joint_guards[:, 1])
+        return q
+
     # ── Kinematics helpers ────────────────────────────────────────────────────
 
     def _warm_up_ik(self) -> None:
@@ -482,7 +558,7 @@ class DaggerInterventionAgent(Agent):
         mid-rollout, which is exactly when a stall is least acceptable.
         """
         t0 = time.perf_counter()
-        seed = np.zeros(ARM_DOF)
+        seed = self._guard_arm_joints(np.zeros(ARM_DOF))
         self._solve_ik(
             self._robot, EE_LINK, np.array([1.0, 0.0, 0.0, 0.0]), np.array([0.3, 0.0, 0.3]), seed
         )
@@ -511,15 +587,19 @@ class DaggerInterventionAgent(Agent):
         # get_target_poses() builds the IK target as control @ tcp_offset, so
         # undo the offset to get the link_6 pose the solver wants.
         T_link6 = T_tcp_target @ self._tcp_offset.inverse()
+        seed_motor = self._guard_arm_joints(seed_motor)
         sol_urdf = self._solve_ik(
             self._robot,
             EE_LINK,
             np.asarray(T_link6.rotation().wxyz, dtype=np.float64),
             np.asarray(T_link6.translation(), dtype=np.float64),
-            np.flip(np.asarray(seed_motor[:ARM_DOF], dtype=np.float64)),
+            np.flip(seed_motor),
             self._ik_seed_weight,
         )
-        q_motor = np.flip(np.asarray(sol_urdf, dtype=np.float64))
+        # Pyroki already solves against these bounds. Keep an explicit guard,
+        # as Market42 does, so numerical tolerance can never leak out-of-range
+        # commands to the follower controller.
+        q_motor = self._guard_arm_joints(np.flip(np.asarray(sol_urdf, dtype=np.float64)))
 
         achieved = self._fk_tcp(self._urdf_fol, q_motor)
         pos_err = float(np.linalg.norm(achieved.translation() - T_tcp_target.translation()))
@@ -925,6 +1005,23 @@ class DaggerInterventionAgent(Agent):
 
         edges = self._poll_button_edges()
 
+        # A dedicated hardware equivalent of the TUI space bar. The AgentNode
+        # publishes this one-shot request and Session owns the actual gate.
+        pause_toggle_requested = False
+        if self._pause_button_index is not None:
+            if self._pause_button_arm is None:
+                pause_toggle_requested = edges[self._pause_button_index]
+            else:
+                pause_toggle_requested = self._button_edges_by_arm[
+                    (self._pause_button_arm, self._pause_button_index)
+                ]
+            if pause_toggle_requested:
+                logger.info(
+                    "session play/pause toggle requested — %s %s button",
+                    self._pause_button_arm or "either",
+                    BUTTON_COLOURS.get(self._pause_button_index, "?"),
+                )
+
         # ── Yellow: takeover / hand back. Only meaningful mid-rollout; ignored
         # while parked, where there is no episode to correct.
         if not rehome_requested and edges[self._button_index]:
@@ -939,8 +1036,8 @@ class DaggerInterventionAgent(Agent):
                     BUTTON_COLOURS.get(self._episode_button_index, "episode"),
                 )
 
-        # ── White: the rollout cycle. This deployment scopes it to the left
-        # leader so the right lower button cannot accidentally end an episode.
+        # ── Left white: rollout save/home. The right white switch is kept out
+        # of this path because it owns the separate Session pause toggle.
         episode_edge = False
         if self._episode_button_index is not None:
             if self._episode_button_arm is None:
@@ -997,6 +1094,8 @@ class DaggerInterventionAgent(Agent):
         if self._policy_reset_pending:
             extras["policy_reset"] = {"reset": True}
             self._policy_reset_pending = False
+        if pause_toggle_requested:
+            extras["pause_toggle"] = {"toggle": True}
         action["_extras"] = extras
         # Session's monitor loop edge-detects this latch on record_topic:
         # False→True starts an episode, True→False ends and saves it.

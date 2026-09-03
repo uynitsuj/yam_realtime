@@ -20,10 +20,15 @@ class FakeLeader:
 
 D.PassiveGelloLeaderAgent = FakeLeader
 HOME = np.array([0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0])
+FOLLOWER_LIMITS = np.array([
+    [-2.09, 3.14], [0.0, 3.14], [0.05, 3.14],
+    [-1.35, 1.35], [-1.50, 1.50], [-2.00, 2.00],
+])
 agent = D.DaggerInterventionAgent(episode_button_arm="left",
                                   handback_blend_s=0.3, handback_fresh_timeout_s=0.5,
                                   home_joint_pos=list(HOME), home_on_episode_end=True,
-                                  homing_max_joint_speed=8.0, home_tol_rad=0.03)
+                                  homing_max_joint_speed=8.0, home_tol_rad=0.03,
+                                  joint_limits=FOLLOWER_LIMITS, joint_limit_margin=0.1)
 L = agent._leaders
 
 POLICY = {"left": np.array([0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]),
@@ -80,6 +85,18 @@ def arm_mrad(a, b):
 
 def grip_step(a, b):
     return max(abs(a[k][6] - b[k][6]) for k in a)
+
+print("\n[0a] follower limits constrain IK with a soft margin")
+expected_lower = FOLLOWER_LIMITS[:, 0] + 0.1
+expected_upper = FOLLOWER_LIMITS[:, 1] - 0.1
+check("motor-order guards use the configured 0.1 rad margin",
+      np.allclose(agent._joint_guards[:, 0], expected_lower)
+      and np.allclose(agent._joint_guards[:, 1], expected_upper))
+check("Pyroki receives the same limits in reversed URDF order",
+      np.allclose(np.asarray(agent._robot.joints.lower_limits), np.flip(expected_lower))
+      and np.allclose(np.asarray(agent._robot.joints.upper_limits), np.flip(expected_upper)))
+check("post-solve guard clips numerical leakage",
+      np.allclose(agent._guard_arm_joints(np.full(6, 99.0)), expected_upper))
 
 def go_live():
     """Leave the parked state and settle into POLICY (via the handback blend)."""

@@ -83,6 +83,8 @@ class Session:
         record_node_names:    Subset of node names to record; defaults to all.
         record_topic:         Full bus topic carrying the boolean record signal
                               (e.g. "gello_left/record").
+        pause_toggle_topic:   Full bus topic carrying one-shot pause-toggle
+                              requests (e.g. "dagger/pause_toggle").
         auto_record_duration: If set, automatically start recording on
                               session start and stop after this many seconds.
         episode_timeout:      If set, automatically stop recording and pause
@@ -103,11 +105,14 @@ class Session:
         episode_timeout: float | None = None,
         pub_port: int = 5555,
         sub_port: int = DEFAULT_SUB_PORT,
+        pause_toggle_topic: str | None = None,
     ) -> None:
         self._pub_port = pub_port
         self._sub_port = sub_port
         self._save_root = Path(save_root)
         self._record_topic = record_topic
+        self._pause_toggle_topic = pause_toggle_topic
+        self._last_pause_toggle_ts: float | None = None
         self._auto_record_duration = auto_record_duration
         # start_paused: begin with RobotNode commands gated so the arms don't
         # start tracking the policy (or any cmd_topic producer) until the
@@ -411,7 +416,8 @@ class Session:
     def _monitor_loop(self) -> None:
         """Subscribe to all bus topics; measure Hz per node.
 
-        Also watches record_topic for start/stop signals.
+        Also watches record_topic for start/stop signals and
+        pause_toggle_topic for one-shot pause-gate requests.
         """
         ctx = zmq.Context.instance()
         sock = ctx.socket(zmq.SUB)
@@ -453,6 +459,20 @@ class Session:
 
                 # Measure publish Hz
                 self._status[node_name].record_message(topic_suffix)
+
+                # Hardware equivalent of the TUI space bar. Deduplicate by the
+                # publisher timestamp in case a transport ever replays a packet.
+                if self._pause_toggle_topic and topic == self._pause_toggle_topic:
+                    try:
+                        envelope = unpack(payload_b)
+                        toggle = bool(envelope.get("data", {}).get("toggle", False))
+                        request_ts = float(envelope.get("ts"))
+                        if toggle and request_ts != self._last_pause_toggle_ts:
+                            self._last_pause_toggle_ts = request_ts
+                            self.toggle_pause()
+                    except Exception:
+                        pass
+                    continue
 
                 # Handle record signal from gello (or any configured topic)
                 if self._record_topic and topic == self._record_topic:
