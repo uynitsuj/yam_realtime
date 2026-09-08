@@ -9,7 +9,7 @@ nodes:
     name: gello_left
     agent_class: robots_realtime.agents.teleoperation.gello_leader_agent:GelloLeaderAgent
     agent_kwargs:
-      port: /dev/ttyACM0
+      port: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6080669-if00   # ttyACM1 = left leader
       robot_name: left
       include_gripper: true
       joint_signs: [-1, -1, -1, -1, -1, -1]
@@ -21,7 +21,7 @@ nodes:
     name: gello_right
     agent_class: robots_realtime.agents.teleoperation.gello_leader_agent:GelloLeaderAgent
     agent_kwargs:
-      port: /dev/ttyACM1
+      port: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6080553-if00   # ttyACM0 = right leader
       robot_name: right
       include_gripper: true
       joint_signs: [-1, -1, -1, -1, -1, -1]
@@ -49,23 +49,37 @@ nodes:
     shutdown_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     shutdown_duration_s: 2.0
 
+  # Three YHTek/decxin USB cameras (UVC, MJPG 1024x768 @ 30 fps), one per USB controller.
+  # Addressed by USB port path so the mapping survives /dev/videoN renumbering across
+  # reboots. If a camera is moved to another port, refresh the path from
+  #   uv run python -m robots_realtime.sensors.cameras.opencv_camera --list
+  # At time of writing: right = /dev/video0, top = /dev/video2, left = /dev/video4.
+  #
+  # 1024x768 is a full-FOV downscale of the 1280x1024 sensor and runs at a true
+  # 30 fps. Do NOT use 640x480: on this sensor it is a 1:1 center crop (a quarter
+  # of the sensor, ~half the horizontal FOV) and only streams at 60 fps+. Keep
+  # these settings identical to the policy deployment config
+  # (yam_bimanual_openpi_policy_autolab_yam_box_abc.yaml) so train == deploy.
   - type: CameraNode
     name: camera_top
-    driver: ZedCamera
-    device_id: "YOUR_SERIAL"
-    resolution: HD720
+    driver: OpenCVCamera
+    device_path: /dev/v4l/by-path/pci-0000:08:00.0-usb-0:6:1.0-video-index0   # /dev/video2
+    resolution: [1024, 768]
     fps: 30
+    fourcc: MJPG
 
   - type: CameraNode
     name: camera_left
-    driver: ZedCamera
-    device_id: "YOUR_SERIAL"
-    resolution: HD720
+    driver: OpenCVCamera
+    device_path: /dev/v4l/by-path/pci-0000:0b:00.4-usb-0:1.1.1:1.0-video-index0   # /dev/video4
+    resolution: [1024, 768]
     fps: 30
+    fourcc: MJPG
 
   - type: CameraNode
     name: camera_right
-    driver: ZedCamera
-    device_id: "YOUR_SERIAL"
-    resolution: HD720
+    driver: OpenCVCamera
+    device_path: /dev/v4l/by-path/pci-0000:0b:00.3-usb-0:1:1.0-video-index0   # /dev/video0
+    resolution: [1024, 768]
     fps: 30
+    fourcc: MJPG
