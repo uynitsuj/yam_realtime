@@ -82,6 +82,9 @@ class AgentNode(Node):
         publish_freq: float | None = None,
         state_topics: dict[str, str] | None = None,
         image_topics: dict[str, str] | None = None,
+        # Optional operator/viewer control topics: {name: bus_topic}. The latest dict per name is handed to
+        # the agent via ``agent.set_controls({name: dict})`` before every act() — never merged into obs.
+        control_topics: dict[str, str] | None = None,
         arm_key: str | None = None,
         reset_topic: str | None = None,
         normalize_gripper: bool = False,
@@ -92,10 +95,12 @@ class AgentNode(Node):
     ) -> None:
         self._state_topics = state_topics or {}
         self._image_topics = image_topics or {}
+        self._control_topics = control_topics or {}
         self._reset_topic = reset_topic
         self.subscribed_topics = (
             list(self._state_topics.values())
             + list(self._image_topics.values())
+            + list(self._control_topics.values())
             + ([reset_topic] if reset_topic else [])
         )
 
@@ -181,6 +186,15 @@ class AgentNode(Node):
         # DAgger arbiter starting an episode the instant the arms go live — has
         # to be told. Same "_" prefix convention as _topic_ts.
         obs["_paused"] = self._paused
+
+        if self._control_topics and hasattr(self._agent, "set_controls"):
+            ctrl = {name: self.get_latest(topic) for name, topic in self._control_topics.items()}
+            ctrl = {k: v for k, v in ctrl.items() if v is not None}
+            if ctrl:
+                try:
+                    self._agent.set_controls(ctrl)
+                except Exception as exc:
+                    print(f"[{self.name}] set_controls failed: {type(exc).__name__}: {exc}", flush=True)
 
         _t_act = time.perf_counter()
         action = self._agent.act(obs)
@@ -306,6 +320,7 @@ class AgentNode(Node):
             "publish_freq": params.get("publish_freq"),
             "state_topics": params.get("state_topics"),
             "image_topics": params.get("image_topics"),
+            "control_topics": params.get("control_topics"),
             "arm_key": params.get("arm_key"),
             "reset_topic": params.get("reset_topic"),
             "normalize_gripper": params.get("normalize_gripper", False),

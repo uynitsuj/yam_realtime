@@ -51,6 +51,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 import webbrowser
 from typing import Any
 
@@ -153,11 +154,21 @@ class ViserMonitorNode(Node):
         # list of {path: <.npz with points (N,3) float32 world/cell frame + colors (N,3) uint8>,
         #          name?: str, point_size?: float, visible?: bool}. Loaded once at start.
         point_clouds: list[dict] | None = None,
+        # Operator controls for the anchor-steering agent, published on ``<name>/steer_ctrl`` (the AgentNode's
+        # ``control_topics`` feeds them to SteeringAgent.set_controls): steering may keep computing/drawing
+        # candidates while the robot executes the plain policy sample, and the guidance strength is live.
+        steer_control: bool = False,
+        steer_control_defaults: dict | None = None,
         writer=None,
         **kwargs,
     ) -> None:
         self._point_clouds_spec = list(point_clouds or [])
         self._cloud_handles: dict = {}
+        self._steer_control = bool(steer_control)
+        self._steer_ctrl = {"steer_enabled": True, "lam_scale": 0.0}
+        self._steer_ctrl.update(steer_control_defaults or {})
+        self._steer_ctrl_dirty = True
+        self._steer_ctrl_last_pub = 0.0
         self._urdfs_spec = urdfs or {}
         self._image_topics = image_topics or {}
         self._chunk_topic = chunk_topic
@@ -315,6 +326,24 @@ class ViserMonitorNode(Node):
                 print(f"[{self.name}] point cloud '{name}': {len(pts)} pts from {path}", flush=True)
             except Exception as exc:
                 print(f"[{self.name}] point cloud '{name}' failed ({path}): {type(exc).__name__}: {exc}", flush=True)
+
+        if self._steer_control:
+            with self._server.gui.add_folder("steering control"):
+                cb_ctrl = self._server.gui.add_checkbox("steering controls the robot", bool(self._steer_ctrl["steer_enabled"]))
+                sl_lam = self._server.gui.add_slider("guidance strength (λ scale)", 0.0, 1.0, 0.05, float(self._steer_ctrl["lam_scale"]))
+                self._server.gui.add_markdown(
+                    "Off = the agent still asks for K candidates, ranks and draws them, but the robot executes the "
+                    "plain (unsteered) sample. λ scale 0 = selection only; > 0 adds gradient guidance toward the target.")
+
+            @cb_ctrl.on_update
+            def _(_ev):
+                self._steer_ctrl["steer_enabled"] = bool(cb_ctrl.value)
+                self._steer_ctrl_dirty = True
+
+            @sl_lam.on_update
+            def _(_ev):
+                self._steer_ctrl["lam_scale"] = float(sl_lam.value)
+                self._steer_ctrl_dirty = True
 
         if self._auto_open_browser:
             self._open_browser()
@@ -491,9 +520,11 @@ class ViserMonitorNode(Node):
                 col = tuple(int(c) for c in (good * (1 - rank[k]) + bad * rank[k]))
                 self._steer_handles[name] = self._server.scene.add_spline_catmull_rom(
                     name, points=paths[k], line_width=6.0 if is_sel else 1.5, color=col)
-            want.add("/steering/selected_end")                   # the winner's endpoint, easy to spot
+            want.add("/steering/selected_end")                   # endpoint of the EXECUTED chunk (green: steered, orange: plain)
+            executed_is_steered = bool(msg.get("steer_enabled", True))
             self._steer_handles["/steering/selected_end"] = self._server.scene.add_icosphere(
-                "/steering/selected_end", radius=0.012, color=(30, 220, 30), position=tuple(paths[sel, -1].astype(float)))
+                "/steering/selected_end", radius=0.012, color=(30, 220, 30) if executed_is_steered else (255, 140, 0),
+                position=tuple(paths[sel, -1].astype(float)))
 
         # raw VLM/depth points (small grey) linked to the offset targets they produce
         for key in ("bin", "hole"):
@@ -537,11 +568,13 @@ class ViserMonitorNode(Node):
                 self._steer_gui = None
         if self._steer_gui is not None:
             phase = msg.get("phase", "?")
+            robot = "STEERED" if bool(msg.get("steer_enabled", True)) else "PLAIN sample (steering off)"
             if steered:
-                self._steer_gui.value = (f"{phase}  arm={msg.get('arm','?')}  k={sel}/{int(msg.get('K', 0))}  "
-                                         f"closest {100 * float(msg.get('d_best', 0.0)):.1f} cm (spread {100 * float(msg.get('spread', 0.0)):.1f})")
+                self._steer_gui.value = (f"{phase}  arm={msg.get('arm','?')}  exec k={sel} best k={int(msg.get('best', sel))}/{int(msg.get('K', 0))}  "
+                                         f"closest {100 * float(msg.get('d_best', 0.0)):.1f} cm (spread {100 * float(msg.get('spread', 0.0)):.1f})  "
+                                         f"λ={float(msg.get('lam_scale', 0.0)):.2f}  robot: {robot}")
             else:
-                self._steer_gui.value = f"{phase}  (not steering)"
+                self._steer_gui.value = f"{phase}  (no target this phase)  robot: {robot}"
 
     def _update_chunk_frames(self, chunk_msg: dict) -> None:
         """Per-tick: run FK on downsampled chunk actions, update frame handles."""
@@ -663,6 +696,16 @@ class ViserMonitorNode(Node):
             chunk_msg = self.get_latest(self._chunk_topic)
             if chunk_msg is not None:
                 self._update_chunk_frames(chunk_msg)
+
+        # Publish the operator's steering controls (on change + 2 s heartbeat so a late agent catches up).
+        if self._steer_control:
+            now = time.monotonic()
+            if self._steer_ctrl_dirty or now - self._steer_ctrl_last_pub > 2.0:
+                try:
+                    self.publish("steer_ctrl", dict(self._steer_ctrl), record=False)
+                    self._steer_ctrl_dirty, self._steer_ctrl_last_pub = False, now
+                except Exception as exc:
+                    logger.debug("[%s] steer_ctrl publish failed: %s", self.name, exc)
 
         # Update anchor-steering overlay (if enabled).
         if self._steering_topic:
@@ -984,6 +1027,8 @@ class ViserMonitorNode(Node):
             "chunk_topic":             params.get("chunk_topic"),
             "steering_topic":          params.get("steering_topic"),
             "point_clouds":            params.get("point_clouds") or [],
+            "steer_control":           bool(params.get("steer_control", False)),
+            "steer_control_defaults":  params.get("steer_control_defaults") or {},
             "n_chunk_frames":          int(params.get("n_chunk_frames", 10)),
             "chunk_frame_axes_length": float(params.get("chunk_frame_axes_length", 0.03)),
             "chunk_frame_axes_radius": float(params.get("chunk_frame_axes_radius", 0.0025)),
