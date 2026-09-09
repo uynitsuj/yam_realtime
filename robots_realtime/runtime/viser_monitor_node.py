@@ -145,12 +145,20 @@ class ViserMonitorNode(Node):
         n_chunk_frames: int = 10,
         chunk_frame_axes_length: float = 0.03,
         chunk_frame_axes_radius: float = 0.0025,
+        # Optional anchor-steering visualization: subscribe to the SteeringAgent's
+        # `steering` topic and render the K candidate hand paths (selected in green),
+        # the bin / hole / active anchor, and the current phase.
+        steering_topic: str | None = None,
         writer=None,
         **kwargs,
     ) -> None:
         self._urdfs_spec = urdfs or {}
         self._image_topics = image_topics or {}
         self._chunk_topic = chunk_topic
+        self._steering_topic = steering_topic
+        self._steer_handles: dict = {}
+        self._steer_gui = None
+        self._steer_seen = False
         self._n_chunk_frames = int(max(0, n_chunk_frames))
         self._chunk_axes_length = float(chunk_frame_axes_length)
         self._chunk_axes_radius = float(chunk_frame_axes_radius)
@@ -158,6 +166,7 @@ class ViserMonitorNode(Node):
             [spec["state_topic"] for spec in self._urdfs_spec.values() if "state_topic" in spec]
             + list(self._image_topics.values())
             + ([self._chunk_topic] if self._chunk_topic else [])
+            + ([self._steering_topic] if self._steering_topic else [])
         )
         # poll_freq drives how often the URDF/image GUI updates — lower is cheaper.
         self.poll_freq = float(viz_freq)
@@ -422,6 +431,57 @@ class ViserMonitorNode(Node):
             self.name, arm_key, spec.get("chunk_arm_key"), self._n_chunk_frames,
         )
 
+    def _update_steering(self, msg: dict) -> None:
+        """Render the SteeringAgent snapshot: candidate hand paths (cell frame == this scene's
+        world frame), the bin/hole/active anchor spheres, and a phase read-out in the GUI.
+
+        Everything is drawn under /steering; nodes are addressed by a stable name so a re-add
+        overwrites in place, and paths that disappear when K shrinks or steering stops are removed.
+        """
+        import numpy as _np
+        want: set[str] = set()
+
+        steered = bool(msg.get("steered", False))
+        paths = msg.get("paths")
+        sel = int(msg.get("selected", 0))
+        if steered and paths is not None:
+            paths = _np.asarray(paths, dtype=_np.float32)        # (K, H, 3)
+            for k in range(paths.shape[0]):
+                name = f"/steering/cand/{k:02d}"
+                want.add(name)
+                is_sel = (k == sel)
+                self._steer_handles[name] = self._server.scene.add_spline_catmull_rom(
+                    name, points=paths[k], line_width=5.0 if is_sel else 1.5,
+                    color=(30, 220, 30) if is_sel else (150, 150, 150))
+
+        for key, col, rad in (("anchor", (235, 30, 30), 0.022), ("bin", (255, 140, 0), 0.016), ("hole", (0, 200, 255), 0.016)):
+            p = msg.get(key)
+            if p is not None:
+                name = f"/steering/{key}"
+                want.add(name)
+                self._steer_handles[name] = self._server.scene.add_icosphere(
+                    name, radius=rad, color=col, position=tuple(_np.asarray(p, dtype=float)))
+
+        for name in list(self._steer_handles):                    # drop stale nodes (K shrank / steering stopped)
+            if name not in want:
+                try:
+                    self._steer_handles.pop(name).remove()
+                except Exception:
+                    pass
+
+        if self._steer_gui is None:
+            try:
+                self._steer_gui = self._server.gui.add_text("steering", initial_value="", disabled=True)
+            except Exception:
+                self._steer_gui = None
+        if self._steer_gui is not None:
+            phase = msg.get("phase", "?")
+            if steered:
+                self._steer_gui.value = (f"{phase}  arm={msg.get('arm','?')}  k={sel}/{int(msg.get('K', 0))}  "
+                                         f"closest {100 * float(msg.get('d_best', 0.0)):.1f} cm (spread {100 * float(msg.get('spread', 0.0)):.1f})")
+            else:
+                self._steer_gui.value = f"{phase}  (not steering)"
+
     def _update_chunk_frames(self, chunk_msg: dict) -> None:
         """Per-tick: run FK on downsampled chunk actions, update frame handles."""
         for arm_key, spec in self._urdfs_spec.items():
@@ -542,6 +602,23 @@ class ViserMonitorNode(Node):
             chunk_msg = self.get_latest(self._chunk_topic)
             if chunk_msg is not None:
                 self._update_chunk_frames(chunk_msg)
+
+        # Update anchor-steering overlay (if enabled).
+        if self._steering_topic:
+            steer_msg = self.get_latest(self._steering_topic)
+            if steer_msg is not None:
+                try:
+                    if not self._steer_seen:
+                        self._steer_seen = True
+                        # stdout: node stdout is what the session TUI shows (node loggers go to the temp log dir)
+                        print(f"[{self.name}] steering overlay: first message (phase={steer_msg.get('phase')}, "
+                              f"K={steer_msg.get('K')}, steered={steer_msg.get('steered')})", flush=True)
+                    self._update_steering(steer_msg)
+                except Exception as exc:
+                    if not getattr(self, "_steer_err_printed", False):
+                        self._steer_err_printed = True
+                        print(f"[{self.name}] steering overlay update failed: {type(exc).__name__}: {exc}", flush=True)
+                    logger.debug("[%s] steering overlay update failed: %s", self.name, exc)
 
         # Update camera panels.
         for label, topic in self._image_topics.items():
@@ -844,6 +921,7 @@ class ViserMonitorNode(Node):
             "initial_camera_look_at":  tuple(params.get("initial_camera_look_at",  (0.45, 0.3, 0.3))),
             "up_axis":                 params.get("up_axis", "+z"),
             "chunk_topic":             params.get("chunk_topic"),
+            "steering_topic":          params.get("steering_topic"),
             "n_chunk_frames":          int(params.get("n_chunk_frames", 10)),
             "chunk_frame_axes_length": float(params.get("chunk_frame_axes_length", 0.03)),
             "chunk_frame_axes_radius": float(params.get("chunk_frame_axes_radius", 0.0025)),

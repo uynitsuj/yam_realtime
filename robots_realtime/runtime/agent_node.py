@@ -197,6 +197,14 @@ class AgentNode(Node):
         if chunk is not None:
             self.publish("chunk", chunk, ts=ts)
 
+        # Optional steering snapshot for visualization consumers (ViserMonitorNode):
+        # candidate hand paths, phase, and the anchor the policy is being steered to.
+        # Numpy passes through the bus like `_chunk`; keep it off the joint-command path
+        # and off the record path (record=False) so it never hits the JSON fallback.
+        steering = action.get("_steering_viz")
+        if steering is not None:
+            self.publish("steering", steering, ts=ts, record=False)
+
         # Optional preprocessed-image snapshots — the exact frames fed to the
         # policy. Mirrored on image/{label} so downstream viewers (viser
         # monitor) can subscribe without reprocessing raw cameras themselves.
