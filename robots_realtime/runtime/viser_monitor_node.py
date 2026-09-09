@@ -149,9 +149,15 @@ class ViserMonitorNode(Node):
         # `steering` topic and render the K candidate hand paths (selected in green),
         # the bin / hole / active anchor, and the current phase.
         steering_topic: str | None = None,
+        # Optional static point clouds (e.g. the depth snapshot the anchors were derived from):
+        # list of {path: <.npz with points (N,3) float32 world/cell frame + colors (N,3) uint8>,
+        #          name?: str, point_size?: float, visible?: bool}. Loaded once at start.
+        point_clouds: list[dict] | None = None,
         writer=None,
         **kwargs,
     ) -> None:
+        self._point_clouds_spec = list(point_clouds or [])
+        self._cloud_handles: dict = {}
         self._urdfs_spec = urdfs or {}
         self._image_topics = image_topics or {}
         self._chunk_topic = chunk_topic
@@ -286,6 +292,29 @@ class ViserMonitorNode(Node):
             # Pre-allocate chunk prediction frames for this arm if it opted in.
             if self._chunk_topic and spec.get("chunk_arm_key") and self._n_chunk_frames > 0:
                 self._init_chunk_frames(arm_key, root, spec)
+
+        for i, spec in enumerate(self._point_clouds_spec):
+            path = spec.get("path")
+            name = str(spec.get("name") or f"cloud_{i}")
+            try:
+                z = np.load(path)
+                pts = np.asarray(z["points"], dtype=np.float32)
+                cols = np.asarray(z["colors"], dtype=np.uint8) if "colors" in z else np.full((len(pts), 3), 200, np.uint8)
+                h = self._server.scene.add_point_cloud(f"/clouds/{name}", pts, cols,
+                                                       point_size=float(spec.get("point_size", 0.004)),
+                                                       point_shape="circle", precision="float16")
+                h.visible = bool(spec.get("visible", True))
+                self._cloud_handles[name] = h
+                cb = self._server.gui.add_checkbox(f"cloud: {name}", h.visible)
+
+                def _mk(handle):
+                    def _cb(ev):
+                        handle.visible = ev.target.value
+                    return _cb
+                cb.on_update(_mk(h))
+                print(f"[{self.name}] point cloud '{name}': {len(pts)} pts from {path}", flush=True)
+            except Exception as exc:
+                print(f"[{self.name}] point cloud '{name}' failed ({path}): {type(exc).__name__}: {exc}", flush=True)
 
         if self._auto_open_browser:
             self._open_browser()
@@ -446,13 +475,40 @@ class ViserMonitorNode(Node):
         sel = int(msg.get("selected", 0))
         if steered and paths is not None:
             paths = _np.asarray(paths, dtype=_np.float32)        # (K, H, 3)
-            for k in range(paths.shape[0]):
+            K = paths.shape[0]
+            scores = msg.get("scores")
+            # colour by rank of the score (closest approach to the target): best = bright green, worst = grey-blue
+            if scores is not None and len(scores) == K:
+                order = _np.argsort(_np.asarray(scores, dtype=float))
+                rank = _np.empty(K, dtype=float); rank[order] = _np.linspace(0.0, 1.0, K) if K > 1 else 0.0
+            else:
+                rank = _np.ones(K); rank[sel] = 0.0
+            good, bad = _np.array([30, 220, 30], float), _np.array([95, 95, 120], float)
+            for k in range(K):
                 name = f"/steering/cand/{k:02d}"
                 want.add(name)
                 is_sel = (k == sel)
+                col = tuple(int(c) for c in (good * (1 - rank[k]) + bad * rank[k]))
                 self._steer_handles[name] = self._server.scene.add_spline_catmull_rom(
-                    name, points=paths[k], line_width=5.0 if is_sel else 1.5,
-                    color=(30, 220, 30) if is_sel else (150, 150, 150))
+                    name, points=paths[k], line_width=6.0 if is_sel else 1.5, color=col)
+            want.add("/steering/selected_end")                   # the winner's endpoint, easy to spot
+            self._steer_handles["/steering/selected_end"] = self._server.scene.add_icosphere(
+                "/steering/selected_end", radius=0.012, color=(30, 220, 30), position=tuple(paths[sel, -1].astype(float)))
+
+        # raw VLM/depth points (small grey) linked to the offset targets they produce
+        for key in ("bin", "hole"):
+            raw, tgt = msg.get(f"{key}_point"), msg.get(key)
+            if raw is not None:
+                name = f"/steering/{key}_point"
+                want.add(name)
+                self._steer_handles[name] = self._server.scene.add_icosphere(
+                    name, radius=0.009, color=(200, 200, 200), position=tuple(_np.asarray(raw, dtype=float)))
+                if tgt is not None:
+                    lname = f"/steering/{key}_link"
+                    want.add(lname)
+                    seg = _np.stack([_np.asarray(raw, dtype=_np.float32), _np.asarray(tgt, dtype=_np.float32)])
+                    self._steer_handles[lname] = self._server.scene.add_spline_catmull_rom(
+                        lname, points=seg, line_width=1.0, color=(255, 140, 0) if key == "bin" else (0, 200, 255))
 
         for key, col, rad in (("anchor", (235, 30, 30), 0.022), ("bin", (255, 140, 0), 0.016), ("hole", (0, 200, 255), 0.016)):
             p = msg.get(key)
@@ -472,6 +528,11 @@ class ViserMonitorNode(Node):
         if self._steer_gui is None:
             try:
                 self._steer_gui = self._server.gui.add_text("steering", initial_value="", disabled=True)
+                self._server.gui.add_markdown(
+                    "**steering overlay** — paths: the K candidate chunks' hand paths, coloured by rank of closest approach "
+                    "to the target (green = best … grey = worst); the thick one with the green end-sphere is the executed chunk. "
+                    "Spheres: red = active target of the phase; orange = bin target; cyan = hole (release) target; small grey "
+                    "= the raw VLM/depth point each target is offset from (thin line).")
             except Exception:
                 self._steer_gui = None
         if self._steer_gui is not None:
@@ -922,6 +983,7 @@ class ViserMonitorNode(Node):
             "up_axis":                 params.get("up_axis", "+z"),
             "chunk_topic":             params.get("chunk_topic"),
             "steering_topic":          params.get("steering_topic"),
+            "point_clouds":            params.get("point_clouds") or [],
             "n_chunk_frames":          int(params.get("n_chunk_frames", 10)),
             "chunk_frame_axes_length": float(params.get("chunk_frame_axes_length", 0.03)),
             "chunk_frame_axes_radius": float(params.get("chunk_frame_axes_radius", 0.0025)),
