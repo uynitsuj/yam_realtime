@@ -18,19 +18,57 @@ import signal
 import sys
 
 
+_MAIN_PID = os.getpid()
+
+
+def _descendant_pids(root: int) -> list[int]:
+    """All live descendants of `root` (children first), via /proc — no psutil dependency."""
+    children: dict[int, list[int]] = {}
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/stat") as fh:
+                ppid = int(fh.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(ppid, []).append(int(d))
+    out: list[int] = []
+    stack = [root]
+    while stack:
+        for c in children.get(stack.pop(), []):
+            out.append(c)
+            stack.append(c)
+    return out
+
+
 def _force_exit(sig, frame):
-    """SIGTERM handler: give session.stop() 3 s then hard-kill the process group."""
+    """SIGTERM handler for the *main* rr-session process: give session.stop() 3 s, then hard-kill
+    our own descendants (node / broker subprocesses) and exit.
+
+    This handler is installed at import time, so forked children (multiprocessing nodes, the
+    message-bus broker) inherit it. A child must NOT run the group kill: the broker receives a
+    SIGTERM from `MessageBus.stop()` during a normal quit, and the old `os.killpg(getpgid(0))`
+    then SIGKILLed the whole process group — including the shell / tmux pane that launched the
+    session. Children just exit; only descendants of the main process are ever killed, never
+    ancestors such as the launching shell.
+    """
+    if os.getpid() != _MAIN_PID:
+        os._exit(0)
+
     import threading
     import time
 
-    def _kill_group():
+    def _kill_descendants():
         time.sleep(3.0)
-        try:
-            os.killpg(os.getpgid(0), signal.SIGKILL)
-        except Exception:
-            os._exit(1)
+        for pid in _descendant_pids(_MAIN_PID):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        os._exit(1)
 
-    threading.Thread(target=_kill_group, daemon=True).start()
+    threading.Thread(target=_kill_descendants, daemon=True).start()
 
 
 signal.signal(signal.SIGTERM, _force_exit)
