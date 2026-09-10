@@ -16,14 +16,18 @@ version: "1"
 #     00420034594E501820313332 -> can_follow_r  (right follower)
 #   robot_configs/yam/{left,right}.yaml address them by those names; both must
 #   be UP at 1 Mbit/s before launch (`ip -br link | grep can`).
-#   Cameras — three decxin / YHTek UVC modules (Realtek 0bda:5883, "USB Camera"),
-#   one per USB host controller so they don't share bandwidth. They carry no
-#   unique serial (all report "YHTek"), so they are addressed by USB port path,
-#   which is stable across reboots and /dev/videoN renumbering:
-#     pci-0000:08:00.0-usb-0:6:1.0      top    (overhead)        /dev/video2 at survey
+#   Cameras — overhead is an Intel RealSense D405 (swapped in 2026-09-09,
+#   replacing the YHTek that used to sit on pci-0000:08:00.0-usb-0:6); the two
+#   wrist cams are decxin / YHTek UVC modules (Realtek 0bda:5883, "USB Camera").
+#   Each camera is on its own USB host controller so they don't share bandwidth.
+#     D405 serial 230422271660        top    (overhead)        RealSenseCamera
 #     pci-0000:0b:00.4-usb-0:1.1.1:1.0  left   (left  arm wrist) /dev/video4 at survey
 #     pci-0000:0b:00.3-usb-0:1:1.0      right  (right arm wrist) /dev/video0 at survey
-#   If a camera is moved to a different port, refresh its path with
+#   The D405 is addressed by serial (`rs-enumerate-devices` or
+#   discover_realsense_cameras() in sensors/cameras/realsense_camera.py). The
+#   YHTeks carry no unique serial (all report "YHTek"), so they are addressed
+#   by USB port path, which is stable across reboots and /dev/videoN
+#   renumbering. If a YHTek is moved to a different port, refresh its path with
 #     uv run python -m robots_realtime.sensors.cameras.opencv_camera --list
 #   (or `ls -l /dev/v4l/by-path`). Only the *-video-index0 node delivers frames;
 #   index1 is the UVC metadata node.
@@ -160,11 +164,15 @@ nodes:
     startup_joint_pos: [0.0, 0.4, 0.35, 0.35, 0.0, 0.0, 1.0]
     startup_duration_s: 2.0
 
-  # Three decxin/YHTek UVC cameras via OpenCVCamera (V4L2 backend) — same paths
-  # and roles as configs/yam/yam_bimanual_gello_teleop.yaml. Swap device_path
-  # values if the physical mounts don't match the labels.
+  # Top: Intel RealSense D405 via RealSenseCamera (pyrealsense2), same driver /
+  # resolution / fov crop as the us07 config whose D405 data this checkpoint
+  # (…_d405_v021…) was trained on. VGA = 640x480 colour, 30 fps.
   #
-  # Camera-specific notes (from `v4l2-ctl --list-formats-ext` + measured 2026-09-07):
+  # Wrists: two decxin/YHTek UVC cameras via OpenCVCamera (V4L2 backend) — same
+  # paths and roles as configs/yam/yam_bimanual_gello_teleop.yaml. Swap
+  # device_path values if the physical mounts don't match the labels.
+  #
+  # YHTek-specific notes (from `v4l2-ctl --list-formats-ext` + measured 2026-09-07):
   #   - RESOLUTION CHANGES THE FOV. The sensor is 1280x1024. Modes 640x480,
   #     640x512, 640x360, 960x540 are 1:1 CENTER CROPS (640x480 = a quarter of
   #     the sensor, ~half the horizontal FOV). 1280x1024, 1280x960, 1024x768
@@ -194,20 +202,20 @@ nodes:
   # publish_fov_crop (fraction in (0, 1], default 1.0 = off) artificially
   # narrows the FOV by center-cropping BEFORE the resize — a deployment knob
   # to match the policy input to the FOV the model was trained on without
-  # changing optics. The us07 config runs 0.88 on the top camera to match its
-  # D405 training data; these YHTek lenses have different optics, so this is
+  # changing optics. The top D405 runs 0.88, copied from the us07 deployment
+  # config for the same D405 training data (the us07 note says the box_abc
+  # teleop recorded at 0.92 — if rollouts look off, try that). The YHTek wrist
+  # cams have different optics from the training-rig D405 wrist cams; they are
   # left at 1.0 (full FOV, identical to what the teleop config records).
-  # Only set it if the checkpoint was trained on FOV-cropped frames.
   - type: CameraNode
     name: camera_top
-    driver: OpenCVCamera
-    device_path: /dev/v4l/by-path/pci-0000:08:00.0-usb-0:6:1.0-video-index0   # /dev/video2 at survey
-    resolution: [1024, 768]   # full-FOV mode; 640x480 is a center crop on this sensor (see notes above)
-    fps: 30                   # native 30 fps at this size -> camera paces the node, no poll_freq
-    fourcc: MJPG
+    driver: RealSenseCamera
+    device_id: "230422271660"   # D405 on pci-0000:08:00.0-usb-0:6 (was the YHTek's port)
+    resolution: VGA
+    fps: 30
     publish_resize: [224, 224]
     publish_resize_mode: center_crop
-    publish_fov_crop: 0.7
+    publish_fov_crop: 0.88
 
   - type: CameraNode
     name: camera_left
